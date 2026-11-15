@@ -36,6 +36,13 @@ export interface FakeConversation {
 export interface FakeScienceDaemon {
   /** A Science CLI stand-in that answers `status` and `url` for this fake daemon. */
   readonly scienceCli: ScienceCli;
+  /** Makes the Science CLI stand-in report the daemon as running (the default) or not running. */
+  reportRunning(running: boolean): void;
+  /**
+   * Answers the next logged-in request to `route` (for example `"GET /api/me"`) with `body`
+   * instead of the usual response, as a daemon version with a different interface would.
+   */
+  respondOnce(route: string, body: unknown): void;
   /** Creates a project and returns its identifier. */
   addProject(name: string): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
@@ -78,7 +85,9 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #projects = new Map<string, string>();
   readonly #conversations: Conversation[] = [];
   readonly #scripts: ReplyScript[] = [];
+  readonly #responseOverrides = new Map<string, unknown>();
   #port = 0;
+  #running = true;
 
   constructor() {
     this.#server = createServer((request, response) => {
@@ -96,6 +105,8 @@ class FakeDaemon implements FakeScienceDaemon {
 
   readonly scienceCli: ScienceCli = async (args) => {
     if (args[0] === "status") {
+      // What the real program prints besides `running` when no daemon is up is not known.
+      if (!this.#running) return JSON.stringify({ running: false });
       return JSON.stringify({ running: true, version: VERSION, port: this.#port });
     }
     if (args[0] === "url") {
@@ -105,6 +116,14 @@ class FakeDaemon implements FakeScienceDaemon {
     }
     throw new Error(`fake Science CLI: unsupported arguments ${args.join(" ")}`);
   };
+
+  reportRunning(running: boolean): void {
+    this.#running = running;
+  }
+
+  respondOnce(route: string, body: unknown): void {
+    this.#responseOverrides.set(route, body);
+  }
 
   addProject(name: string): string {
     const projectId = `proj_${randomBytes(6).toString("hex")}`;
@@ -165,6 +184,12 @@ class FakeDaemon implements FakeScienceDaemon {
     if (!this.#isLoggedIn(cookies)) return sendJson(response, 401, { detail: "Not authenticated" });
     if (request.method === "POST" && !this.#hasValidCsrf(request, cookies)) {
       return sendJson(response, 403, { detail: "CSRF check failed", code: "csrf_invalid" });
+    }
+
+    if (this.#responseOverrides.has(route)) {
+      const body = this.#responseOverrides.get(route);
+      this.#responseOverrides.delete(route);
+      return sendJson(response, 200, body);
     }
 
     if (route === "GET /api/me") return sendJson(response, 200, { user_id: "fake-user" });

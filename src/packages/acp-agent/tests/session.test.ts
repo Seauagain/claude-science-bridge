@@ -53,7 +53,7 @@ describe("opening a session", () => {
     await expect(opening).rejects.toThrow(/not linked to a Claude Science project.*csbridge link/s);
   });
 
-  it("does not need the daemon until a prompt is sent", async () => {
+  it("does not start a conversation until a prompt is sent", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
 
     await harness.withClient((context) => context.buildSession(folder).start());

@@ -10,7 +10,7 @@ import {
   type StopReason,
 } from "@agentclientprotocol/sdk";
 import { writeProjectLink } from "../../../project-link/index.ts";
-import { connectScienceDaemon } from "../../../science-daemon/index.ts";
+import { connectScienceDaemon, type ScienceCli } from "../../../science-daemon/index.ts";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../../science-daemon/testing.ts";
 import { createScienceAgent } from "../../index.ts";
 
@@ -21,8 +21,14 @@ export interface Harness {
   linkedFolder(projectName: string): Promise<{ folder: string; projectId: string }>;
   /** Creates a temporary folder that is not linked to any project. */
   unlinkedFolder(): Promise<string>;
-  /** Runs `use` as an ACP client connected to the agent, already initialized. */
-  withClient<T>(use: (context: ClientContext) => Promise<T>): Promise<T>;
+  /**
+   * Runs `use` as an ACP client connected to the agent, already initialized. The agent uses the
+   * fake daemon's Science CLI stand-in unless `options.scienceCli` replaces it.
+   */
+  withClient<T>(
+    use: (context: ClientContext) => Promise<T>,
+    options?: { scienceCli?: ScienceCli },
+  ): Promise<T>;
   dispose(): Promise<void>;
 }
 
@@ -44,9 +50,10 @@ export async function startHarness(): Promise<Harness> {
       return { folder, projectId };
     },
     unlinkedFolder: newFolder,
-    async withClient(use) {
+    async withClient(use, options = {}) {
+      const scienceCli = options.scienceCli ?? fake.scienceCli;
       const agent = createScienceAgent({
-        connectDaemon: () => connectScienceDaemon({ scienceCli: fake.scienceCli }),
+        connectDaemon: () => connectScienceDaemon({ scienceCli }),
         version: "0.0.0-test",
       });
       return client({ name: "test-client" }).connectWith(agent, async (context) => {
