@@ -1,4 +1,5 @@
 import { DaemonAccess } from "./access.ts";
+import type { ConnectOptions } from "./connect.ts";
 import { parseDaemonStatus } from "./endpoint.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import { createDaemonHttp } from "./http.ts";
@@ -25,13 +26,16 @@ const CHECK_NAMES = ["Science CLI", "Daemon", "Daemon version", "Login"] as cons
  * works. Always returns those four checks, in that order. A check that could not be made because
  * an earlier one failed is reported as a failure that points at the earlier one.
  */
-export async function checkDaemonSetup(scienceCli: ScienceCli): Promise<SetupCheck[]> {
+export async function checkDaemonSetup(
+  scienceCli: ScienceCli,
+  options: Pick<ConnectOptions, "startCommand"> = {},
+): Promise<SetupCheck[]> {
   const checks: SetupCheck[] = [];
   try {
     const status = await runScienceCli(scienceCli, ["status"]);
     checks.push({ name: "Science CLI", status: "pass", message: "found" });
 
-    const endpoint = parseDaemonStatus(status);
+    const endpoint = parseDaemonStatus(status, options.startCommand);
     checks.push({ name: "Daemon", status: "pass", message: `running at ${endpoint.baseUrl}` });
 
     const warning = untestedVersionWarning(endpoint.version);

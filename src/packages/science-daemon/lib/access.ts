@@ -22,12 +22,20 @@ export function newLoginRejected(): ScienceDaemonError {
  */
 export class DaemonAccess {
   readonly #scienceCli: ScienceCli;
+  readonly #startCommand: string | undefined;
   #endpoint: DaemonEndpoint;
   #login: Login;
   #renewal: Promise<Login> | undefined;
 
-  constructor(scienceCli: ScienceCli, endpoint: DaemonEndpoint, login: Login) {
+  /** `startCommand` is what a `not-running` error tells the user to run; see {@link locateDaemon}. */
+  constructor(
+    scienceCli: ScienceCli,
+    endpoint: DaemonEndpoint,
+    login: Login,
+    startCommand?: string,
+  ) {
     this.#scienceCli = scienceCli;
+    this.#startCommand = startCommand;
     this.#endpoint = endpoint;
     this.#login = login;
   }
@@ -45,7 +53,7 @@ export class DaemonAccess {
    * port. Fails with `not-running` when there is none.
    */
   async relocate(): Promise<void> {
-    this.#endpoint = await locateDaemon(this.#scienceCli);
+    this.#endpoint = await locateDaemon(this.#scienceCli, this.#startCommand);
   }
 
   /**

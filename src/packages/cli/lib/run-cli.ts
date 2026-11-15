@@ -35,6 +35,11 @@ Options:
                   The claude-science executable to use. Without it, csbridge tries the
                   CLAUDE_SCIENCE_BIN environment variable, then PATH, then the default
                   Claude Science data folder.
+
+Environment:
+  CSBRIDGE_START_COMMAND
+                  The command that starts Claude Science on this machine, shown when it is
+                  not running. Default: claude-science serve
 `;
 
 /**

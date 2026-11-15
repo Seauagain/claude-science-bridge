@@ -52,6 +52,12 @@ export interface ConnectOptions {
   /** Runs the Science CLI. See {@link ScienceCli}. */
   readonly scienceCli: ScienceCli;
   /**
+   * The command that starts the daemon on this machine, named in the error for a daemon that is
+   * not running. Defaults to `claude-science serve`; set it where the daemon is started through
+   * a launcher of the user's own.
+   */
+  readonly startCommand?: string;
+  /**
    * Receives a one-line warning about something that does not stop the connection: today, a
    * daemon version this release was not tested with. Without it such warnings are not reported.
    */
@@ -70,11 +76,11 @@ const MAX_BUFFERED_SIGNALS = 1000;
  *   `unreachable` or `unexpected-response`.
  */
 export async function connectScienceDaemon(options: ConnectOptions): Promise<ScienceDaemon> {
-  const endpoint = await locateDaemon(options.scienceCli);
+  const endpoint = await locateDaemon(options.scienceCli, options.startCommand);
   const versionWarning = untestedVersionWarning(endpoint.version);
   if (versionWarning !== undefined) options.onWarning?.(versionWarning);
   const login = await logIn(endpoint, options.scienceCli);
-  const access = new DaemonAccess(options.scienceCli, endpoint, login);
+  const access = new DaemonAccess(options.scienceCli, endpoint, login, options.startCommand);
   const http = createDaemonHttp(access);
   const me = expectRecord(await http.get("/me"), "GET /me");
   const socket = await openDaemonSocket(access, expectString(me, "user_id", "GET /me"), {

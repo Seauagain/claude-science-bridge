@@ -14,16 +14,28 @@ export interface DaemonEndpoint {
   readonly socketUrl: string;
 }
 
-/** Asks the Science CLI where the daemon is. Fails with `not-running` when there is none. */
-export async function locateDaemon(scienceCli: ScienceCli): Promise<DaemonEndpoint> {
-  return parseDaemonStatus(await runScienceCli(scienceCli, ["status"]));
+/** The command that starts the daemon on a plain installation. */
+export const DEFAULT_START_COMMAND = "claude-science serve";
+
+/**
+ * Asks the Science CLI where the daemon is. Fails with `not-running` when there is none, naming
+ * `startCommand` as the way to start one.
+ */
+export async function locateDaemon(
+  scienceCli: ScienceCli,
+  startCommand: string = DEFAULT_START_COMMAND,
+): Promise<DaemonEndpoint> {
+  return parseDaemonStatus(await runScienceCli(scienceCli, ["status"]), startCommand);
 }
 
 /**
  * Reads what `claude-science status` printed. Fails with `not-running` when it reports no
  * daemon. See "Discovery" in docs/protocol.md.
  */
-export function parseDaemonStatus(output: string): DaemonEndpoint {
+export function parseDaemonStatus(
+  output: string,
+  startCommand: string = DEFAULT_START_COMMAND,
+): DaemonEndpoint {
   const call = "claude-science status";
   let parsed: unknown;
   try {
@@ -40,7 +52,7 @@ export function parseDaemonStatus(output: string): DaemonEndpoint {
   if (status.running !== true) {
     throw new ScienceDaemonError(
       "not-running",
-      "Claude Science is not running. Start it with `claude-science serve` and try again.",
+      `Claude Science is not running. Start it with \`${startCommand}\` and try again.`,
     );
   }
   const port = expectNumber(status, "port", call);

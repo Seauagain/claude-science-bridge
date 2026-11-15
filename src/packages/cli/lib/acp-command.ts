@@ -7,6 +7,7 @@ import {
   type ScienceCli,
   type ScienceDaemon,
 } from "../../science-daemon/index.ts";
+import { daemonSetup } from "./daemon-setup.ts";
 import type { CliIo } from "./run-cli.ts";
 
 /**
@@ -18,7 +19,7 @@ export async function runAcpCommand(io: CliIo & { scienceCli: ScienceCli }): Pro
   const agent = createScienceAgent({
     connectDaemon: () => {
       const connection = connectScienceDaemon({
-        scienceCli: io.scienceCli,
+        ...daemonSetup(io),
         onWarning: (message) => io.stderr.write(`csbridge: warning: ${message}\n`),
       });
       connections.push(connection);

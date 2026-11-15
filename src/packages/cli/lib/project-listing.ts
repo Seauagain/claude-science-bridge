@@ -1,8 +1,9 @@
-import { connectScienceDaemon, type Project, type ScienceCli } from "../../science-daemon/index.ts";
+import { connectScienceDaemon, type Project } from "../../science-daemon/index.ts";
+import type { DaemonSetup } from "./daemon-setup.ts";
 
 /** Asks the daemon for the user's projects, over a connection opened just for that. */
-export async function fetchProjects(scienceCli: ScienceCli): Promise<Project[]> {
-  const daemon = await connectScienceDaemon({ scienceCli });
+export async function fetchProjects(setup: DaemonSetup): Promise<Project[]> {
+  const daemon = await connectScienceDaemon(setup);
   try {
     return await daemon.listProjects();
   } finally {

@@ -7,6 +7,7 @@ import {
   writeProjectLink,
 } from "../../project-link/index.ts";
 import type { Project, ScienceCli } from "../../science-daemon/index.ts";
+import { daemonSetup } from "./daemon-setup.ts";
 import { CommandError, reportFailure } from "./failure.ts";
 import { parseLinkArguments } from "./link-arguments.ts";
 import { fetchProjects, NO_PROJECTS, projectLine } from "./project-listing.ts";
@@ -21,7 +22,7 @@ export async function runLinkCommand(
     const wanted = parseLinkArguments(args);
     const folder = resolve(io.cwd, wanted.folder ?? ".");
     await expectFolder(folder);
-    const project = chooseProject(await fetchProjects(io.scienceCli), wanted.project);
+    const project = chooseProject(await fetchProjects(daemonSetup(io)), wanted.project);
     const previous = await findProjectLink(folder).catch((error: unknown) => {
       // A link that cannot be read is what linking again repairs, so it must not stop the command.
       if (!(error instanceof ProjectLinkError)) throw error;

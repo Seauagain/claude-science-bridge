@@ -1,5 +1,6 @@
 import { findProjectLink, ProjectLinkError } from "../../project-link/index.ts";
 import { checkDaemonSetup, type ScienceCli, type SetupCheck } from "../../science-daemon/index.ts";
+import { daemonSetup } from "./daemon-setup.ts";
 import type { CliIo } from "./run-cli.ts";
 
 const LABELS: Readonly<Record<SetupCheck["status"], string>> = {
@@ -13,7 +14,10 @@ const LABELS: Readonly<Record<SetupCheck["status"], string>> = {
  * Returns 1 when a check failed and 0 otherwise; a warning does not fail it.
  */
 export async function runDoctorCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
-  const checks = [...(await checkDaemonSetup(io.scienceCli)), await checkProjectLink(io.cwd)];
+  const checks = [
+    ...(await checkDaemonSetup(io.scienceCli, daemonSetup(io))),
+    await checkProjectLink(io.cwd),
+  ];
   for (const check of checks) {
     // A message can quote the daemon or the Science CLI: keep it on the one line a check gets.
     const message = check.message.replace(/\s*[\r\n]+\s*/g, " ");
