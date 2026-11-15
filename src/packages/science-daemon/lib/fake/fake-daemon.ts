@@ -18,6 +18,11 @@ export interface FakeTurn {
   complete(): void;
   /** Ends the turn as failed, with the reason the daemon would report. */
   fail(description: string): void;
+  /**
+   * Resolves when the turn is cancelled through `POST /frames/<id>/cancel`. A script that awaits
+   * it keeps the reply running until then.
+   */
+  readonly cancelled: Promise<void>;
 }
 
 /** Decides how the fake daemon answers one message. */
@@ -42,6 +47,11 @@ export interface FakeScienceDaemon {
   onNextMessage(script: ReplyScript): void;
   /** Every conversation started so far, oldest first. */
   conversations(): FakeConversation[];
+  /**
+   * Identifiers of the conversations a cancel was requested for, oldest request first. Includes
+   * requests that found no running turn.
+   */
+  cancelRequests(): string[];
   /** Pushes an event to every open socket, as the daemon does for the user's other activity. */
   broadcast(event: JsonRecord): void;
   close(): Promise<void>;
@@ -52,6 +62,8 @@ interface Conversation {
   readonly projectId: string;
   readonly messages: string[];
   status: string;
+  /** Cancels the turn in progress. Undefined while no turn is running. */
+  cancelTurn: (() => void) | undefined;
 }
 
 const VERSION = "0.1.53";
@@ -78,6 +90,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #projects = new Map<string, string>();
   readonly #conversations: Conversation[] = [];
   readonly #scripts: ReplyScript[] = [];
+  readonly #cancelRequests: string[] = [];
   #port = 0;
 
   constructor() {
@@ -122,6 +135,10 @@ class FakeDaemon implements FakeScienceDaemon {
       messages: [...messages],
       status,
     }));
+  }
+
+  cancelRequests(): string[] {
+    return [...this.#cancelRequests];
   }
 
   broadcast(event: JsonRecord): void {
@@ -172,7 +189,33 @@ class FakeDaemon implements FakeScienceDaemon {
     if (request.method === "POST" && startMatch) {
       return this.#startConversation(decodeURIComponent(startMatch[1] ?? ""), request, response);
     }
+    const cancelMatch = /^\/api\/frames\/([^/]+)\/cancel$/.exec(url.pathname);
+    if (request.method === "POST" && cancelMatch) {
+      return this.#cancel(decodeURIComponent(cancelMatch[1] ?? ""), response);
+    }
     sendJson(response, 404, { detail: `Not found: ${route}` });
+  }
+
+  /**
+   * `POST /frames/<root_id>/cancel`: the running turn ends with status `cancelled`.
+   *
+   * docs/protocol.md does not say what the daemon answers for a conversation it does not know or
+   * one with no running turn. The fake answers 404 and an empty `cancelled_frames` respectively,
+   * and changes nothing.
+   */
+  #cancel(conversationId: string, response: ServerResponse): void {
+    this.#cancelRequests.push(conversationId);
+    const conversation = this.#conversations.find(({ id }) => id === conversationId);
+    if (conversation === undefined) {
+      sendJson(response, 404, { detail: `Frame ${conversationId} not found` });
+      return;
+    }
+    const running = conversation.cancelTurn !== undefined;
+    conversation.cancelTurn?.();
+    sendJson(response, 200, {
+      root_frame_id: conversation.id,
+      cancelled_frames: running ? [conversation.id] : [],
+    });
   }
 
   async #startConversation(
@@ -196,6 +239,7 @@ class FakeDaemon implements FakeScienceDaemon {
       projectId,
       messages: [],
       status: "processing",
+      cancelTurn: undefined,
     };
     this.#conversations.push(conversation);
     this.#beginTurn(conversation, input);
@@ -213,9 +257,14 @@ class FakeDaemon implements FakeScienceDaemon {
     this.#emit(conversation, { type: "frame_activity", phase: "llm_call", iteration: 1 });
 
     let finished = false;
+    let announceCancelled = () => {};
+    const cancelled = new Promise<void>((resolve) => {
+      announceCancelled = resolve;
+    });
     const finish = (status: string, description?: string) => {
       if (finished) return;
       finished = true;
+      conversation.cancelTurn = undefined;
       this.#emit(conversation, { type: "frame_messages_delta", base_idx: 0, appended: null });
       this.#setStatus(conversation, status, description);
     };
@@ -227,6 +276,11 @@ class FakeDaemon implements FakeScienceDaemon {
       },
       complete: () => finish("completed"),
       fail: (description) => finish("failed", description),
+      cancelled,
+    };
+    conversation.cancelTurn = () => {
+      finish("cancelled");
+      announceCancelled();
     };
 
     const script = this.#scripts.shift() ?? defaultReply;

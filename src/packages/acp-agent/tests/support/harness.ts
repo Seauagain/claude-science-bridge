@@ -64,6 +64,11 @@ export async function startHarness(): Promise<Harness> {
   };
 }
 
+/** Cancels the session's running turn, as a client does when the user stops a reply. */
+export function cancelTurn(context: ClientContext, session: ActiveSession): Promise<void> {
+  return context.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
+}
+
 /** Sends one prompt and collects the reply text chunks until the turn stops. */
 export async function runTurn(
   session: ActiveSession,
