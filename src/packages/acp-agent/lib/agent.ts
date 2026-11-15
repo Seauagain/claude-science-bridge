@@ -104,7 +104,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
-      const session: Session = { cwd: params.cwd };
+      const session: Session = { cwd: params.cwd, clientServers: params.mcpServers };
       sessions.set(sessionId, session);
       await offerCommands(client, sessionId);
       return { sessionId, ...(await optionsOf(session).catch(rethrowAsRequestError)) };
@@ -149,6 +149,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         // A session this process is serving already keeps its state, such as a running prompt.
         const session = sessions.get(sessionId) ?? {
           cwd: params.cwd,
+          clientServers: params.mcpServers,
           conversationId,
           ...(await science.conversationSettings(conversationId)),
         };

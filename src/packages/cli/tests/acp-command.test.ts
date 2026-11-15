@@ -59,7 +59,8 @@ async function openSessionThenDisconnect() {
 
     request(1, "initialize", { protocolVersion: 1 });
     request(2, "session/new", { cwd: folder, mcpServers: [] });
-    await waitFor(() => cli.output.stdout.split("\n").length > 2);
+    // The session is open once its request has been answered; a notification comes before that.
+    await waitFor(() => cli.output.stdout.includes('"id":2'));
     cli.stdin.end();
     return { exitCode: await cli.exitCode, output: cli.output };
   } finally {

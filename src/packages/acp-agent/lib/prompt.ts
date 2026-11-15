@@ -1,5 +1,6 @@
 import {
   type AgentContext,
+  type McpServer,
   methods,
   type PromptRequest,
   type PromptResponse,
@@ -12,6 +13,7 @@ import {
   type TranscriptEntry,
   type Turn,
 } from "../../science-daemon/index.ts";
+import { settleClientThread } from "./client-thread.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
@@ -23,6 +25,8 @@ import { settingsInForce } from "./settings.ts";
 export interface Session {
   /** The session's working folder. Its project gets the conversation. */
   readonly cwd: string;
+  /** The MCP servers the client handed over when the session was set up. */
+  readonly clientServers: readonly McpServer[];
   /** The model the user chose or the conversation has. Absent: the daemon's default. */
   model?: string;
   /** The effort the user chose or the conversation started with. Absent: the default. */
@@ -150,7 +154,10 @@ async function openConversation(
   // On record, the conversation is this thread's: it is no longer offered for import, and
   // another adapter process can load the session.
   await surroundings.record.remember(request.sessionId, conversationId);
-  return showTranscript(transcript, request, surroundings);
+  const response = await showTranscript(transcript, request, surroundings);
+  // A conversation that was only brought in is not work that has just finished.
+  await settleClientThread(session.clientServers);
+  return response;
 }
 
 /**
