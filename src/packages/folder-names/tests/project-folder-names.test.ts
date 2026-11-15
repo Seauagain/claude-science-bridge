@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { projectFolderNames } from "../index.ts";
+import { type NamedProject, projectFolderNames } from "../index.ts";
+
+/** The folder names chosen for `projects`, in their order. */
+function folderNames(projects: NamedProject[]): string[] {
+  return projectFolderNames(projects).map(({ folderName }) => folderName);
+}
 
 /** The folder name of a project that shares its name with no other. */
 function folderNameFor(name: string): string | undefined {
-  return projectFolderNames([{ projectId: "proj_aaaaaaaaaaaa", name }])[0];
+  return folderNames([{ projectId: "proj_aaaaaaaaaaaa", name }])[0];
 }
 
 describe("the folder name of a project", () => {
@@ -83,7 +88,7 @@ describe("the folder name of a project", () => {
 
 describe("the folder names of projects that would share one", () => {
   it("carry the identifier of their project, and leave other projects alone", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: "proj_aaaaaaaaaaaa", name: "Protein folding" },
       { projectId: "proj_bbbbbbbbbbbb", name: "Climate model" },
       { projectId: "proj_cccccccccccc", name: "Protein folding" },
@@ -97,7 +102,7 @@ describe("the folder names of projects that would share one", () => {
   });
 
   it("are told apart when the names differ only by letter case", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: "proj_aaaaaaaaaaaa", name: "Protein Folding" },
       { projectId: "proj_bbbbbbbbbbbb", name: "protein folding" },
     ]);
@@ -109,7 +114,7 @@ describe("the folder names of projects that would share one", () => {
   });
 
   it("are told apart when the same letter is written in two Unicode forms", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: "proj_aaaaaaaaaaaa", name: "étude" },
       { projectId: "proj_bbbbbbbbbbbb", name: "étude" },
     ]);
@@ -118,7 +123,7 @@ describe("the folder names of projects that would share one", () => {
   });
 
   it("are told apart when the names only become the same as folder names", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: "proj_aaaaaaaaaaaa", name: "RNA/DNA" },
       { projectId: "proj_bbbbbbbbbbbb", name: "RNA:DNA" },
       { projectId: "proj_cccccccccccc", name: "RNA_DNA." },
@@ -132,7 +137,7 @@ describe("the folder names of projects that would share one", () => {
   });
 
   it("are shortened further, so that the identifier fits within the 60 characters", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: "proj_aaaaaaaaaaaa", name: "x".repeat(300) },
       { projectId: "proj_bbbbbbbbbbbb", name: "x".repeat(300) },
     ]);
@@ -147,14 +152,14 @@ describe("the folder names of projects that would share one", () => {
     const first = { projectId: "proj_aaaaaaaaaaaa", name: "Protein folding" };
     const second = { projectId: "proj_bbbbbbbbbbbb", name: "Protein folding" };
 
-    expect(projectFolderNames([second, first])).toEqual([
+    expect(folderNames([second, first])).toEqual([
       "Protein folding (proj_bbbbbbbbbbbb)",
       "Protein folding (proj_aaaaaaaaaaaa)",
     ]);
   });
 
   it("stay valid and within 60 characters whatever the identifier is", () => {
-    const names = projectFolderNames([
+    const names = folderNames([
       { projectId: `proj/${"a".repeat(100)}`, name: "Protein folding" },
       { projectId: "proj_bbbbbbbbbbbb", name: "Protein folding" },
     ]);

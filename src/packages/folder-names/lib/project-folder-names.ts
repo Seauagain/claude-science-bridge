@@ -8,6 +8,13 @@ export interface NamedProject {
   readonly name: string;
 }
 
+/** A project and the name of the folder that stands for it. */
+export interface ProjectFolderName<P extends NamedProject> {
+  readonly project: P;
+  /** One path segment, never a path. */
+  readonly folderName: string;
+}
+
 /** A longer identifier is cut, so that the name keeps most of the room whatever the daemon sends. */
 const LONGEST_IDENTIFIER = 24;
 
@@ -19,9 +26,11 @@ const LONGEST_IDENTIFIER = 24;
  * their identifier appended. All of them do, rather than all but the first, so that a project's
  * folder name does not depend on the order the projects come in.
  *
- * @returns the folder names, in the order of `projects`.
+ * @returns each project with its folder name, in the order of `projects`.
  */
-export function projectFolderNames(projects: readonly NamedProject[]): string[] {
+export function projectFolderNames<P extends NamedProject>(
+  projects: readonly P[],
+): ProjectFolderName<P>[] {
   const named = projects.map((project) => ({
     project,
     folderName: portableFolderName(project.name),
@@ -31,7 +40,9 @@ export function projectFolderNames(projects: readonly NamedProject[]): string[] 
     uses.set(sameFolder(folderName), (uses.get(sameFolder(folderName)) ?? 0) + 1);
   }
   return named.map(({ project, folderName }) =>
-    uses.get(sameFolder(folderName)) === 1 ? folderName : folderNameWithIdentifier(project),
+    uses.get(sameFolder(folderName)) === 1
+      ? { project, folderName }
+      : { project, folderName: folderNameWithIdentifier(project) },
   );
 }
 

@@ -9,11 +9,15 @@ import {
 import type { Project, ScienceCli } from "../../science-daemon/index.ts";
 import { daemonSetup } from "./daemon-setup.ts";
 import { CommandError, reportFailure } from "./failure.ts";
+import { linkEveryProject } from "./link-all.ts";
 import { parseLinkArguments } from "./link-arguments.ts";
 import { fetchProjects, NO_PROJECTS, projectLine } from "./project-listing.ts";
 import type { CliIo } from "./run-cli.ts";
 
-/** `csbridge link --project <id or name> [folder]`: links a folder to a project. */
+/**
+ * `csbridge link --project <id or name> [folder]`: links a folder to a project.
+ * `csbridge link --all <folder>`: creates a linked sub-folder of a folder for every project.
+ */
 export async function runLinkCommand(
   args: readonly string[],
   io: CliIo & { scienceCli: ScienceCli },
@@ -22,7 +26,10 @@ export async function runLinkCommand(
     const wanted = parseLinkArguments(args);
     const folder = resolve(io.cwd, wanted.folder ?? ".");
     await expectFolder(folder);
-    const project = chooseProject(await fetchProjects(daemonSetup(io)), wanted.project);
+    const projects = await fetchProjects(daemonSetup(io));
+    if (wanted.all) return await linkEveryProject(projects, folder, io);
+
+    const project = chooseProject(projects, wanted.project);
     const previous = await findProjectLink(folder).catch((error: unknown) => {
       // A link that cannot be read is what linking again repairs, so it must not stop the command.
       if (!(error instanceof ProjectLinkError)) throw error;
