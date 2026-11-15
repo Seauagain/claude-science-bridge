@@ -1,5 +1,7 @@
 # claude-science-bridge
 
+**English** | [简体中文](./README.zh-CN.md)
+
 Use Claude Science inside T3 Code, Zed, or any other client that speaks the
 [Agent Client Protocol](https://agentclientprotocol.com), right next to your other agents.
 
