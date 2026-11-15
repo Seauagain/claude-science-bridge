@@ -152,7 +152,21 @@ async function relayTurn(
       // Left unanswered, the requests stay pending: the next prompt brings them up again.
       if (answers === undefined) return { stopReason: "cancelled" };
       if (answers.length > 0) {
-        await (await daemon()).answerInputRequests(turn.conversationId, answers);
+        const applied = await (await daemon()).answerInputRequests(turn.conversationId, answers);
+        if (!applied) {
+          await client.notify(methods.client.session.update, {
+            sessionId: request.sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                type: "text",
+                text:
+                  "This was already answered in Claude Science, so the choice made here " +
+                  "was not applied.\n\n",
+              },
+            },
+          });
+        }
       }
     } else if (event.outcome === "failed") {
       throw new RequestError(

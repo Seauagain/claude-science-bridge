@@ -56,12 +56,17 @@ export async function readInputRequests(
   return inputRequestsOf(expectRecord(frame, "GET /frames/<id>"));
 }
 
-/** A frame served over HTTP has its pending requests in its output; an event has them itself. */
+/**
+ * A frame served over HTTP has its pending requests in its output. They count only while the
+ * frame waits or runs: what a frame's output holds can be left over from a turn that ended.
+ */
 function inputRequestsOf(frame: JsonRecord): InputRequest[] {
-  const own = parseInputRequests(frame.pending_input_requests);
+  if (frame.status !== "awaiting_user_response" && frame.status !== "processing") return [];
+  const holder = typeof frame.id === "string" ? frame.id : undefined;
+  const own = parseInputRequests(frame.pending_input_requests, holder);
   if (own.length > 0) return own;
   return isRecord(frame.output_data)
-    ? parseInputRequests(frame.output_data.pending_input_requests)
+    ? parseInputRequests(frame.output_data.pending_input_requests, holder)
     : [];
 }
 

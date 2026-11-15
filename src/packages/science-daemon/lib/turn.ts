@@ -158,7 +158,7 @@ export class TurnTracker {
     if (event.root_frame_id !== this.#conversationId) return;
     if (event.frame_id !== this.#conversationId) {
       if (event.type === "frame_update" && !this.#eventsMissed) {
-        this.#ask(parseInputRequests(event.pending_input_requests));
+        this.#ask(parseInputRequests(event.pending_input_requests, frameIdOf(event)));
       }
       return;
     }
@@ -176,7 +176,7 @@ export class TurnTracker {
   }
 
   #acceptStatus(event: DaemonEvent): void {
-    const requests = parseInputRequests(event.pending_input_requests);
+    const requests = parseInputRequests(event.pending_input_requests, frameIdOf(event));
     if (event.status === "processing") {
       this.#started = true;
       // An approval the daemon waits for while the turn runs on.
@@ -281,4 +281,9 @@ function undeliveredText(delivered: string, reply: string): string {
     if (delivered.endsWith(reply.slice(0, overlap))) return reply.slice(overlap);
   }
   return reply;
+}
+
+/** The frame an event is about, which holds the input requests the event lists. */
+function frameIdOf(event: DaemonEvent): string | undefined {
+  return typeof event.frame_id === "string" ? event.frame_id : undefined;
 }

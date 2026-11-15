@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { CreateElicitationRequest, RequestPermissionRequest } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cancelTurn, type Harness, runTurn, startHarness } from "./support/harness.ts";
@@ -401,6 +403,154 @@ describe("a request this client cannot answer", () => {
     expect(stopReason).toBe("end_turn");
   });
 });
+
+describe("what the question says about a request for folder access", () => {
+  it("names the access the folder has already and the path that was asked for", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    harness.fake.onNextMessage(async (turn) => {
+      await turn.ask([
+        {
+          kind: "host",
+          target: "/data",
+          requested_path: "/data/genomes/hg38.fa",
+          requested_mode: "rw",
+          existing_mode: "ro",
+        },
+      ]);
+      turn.complete();
+    });
+    harness.answerPermissions(pick("deny"));
+
+    await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "Analyse my genomes");
+    });
+
+    expect(harness.permissionRequests()[0]?.toolCall.title).toBe(
+      "Access /data on your computer (read and write)? " +
+        "It is asked for /data/genomes/hg38.fa. The folder has read-only access now.",
+    );
+  });
+});
+
+describe("a question that lets several choices be picked", () => {
+  it("is left to Claude Science, as a question with one choice to pick is not", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    harness.fake.onNextMessage(async (turn) => {
+      await turn.ask([
+        {
+          kind: "ask",
+          questions: [
+            {
+              question: "Which organisms?",
+              options: [{ label: "Human" }, { label: "Mouse" }],
+              multi_select: true,
+            },
+          ],
+        },
+      ]);
+      turn.replyText("Thanks.");
+      turn.complete();
+    });
+
+    const { chunks } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "Align the reads", (chunk) => {
+        if (chunk.includes("Claude Science")) harness.fake.answerInBrowser(true);
+      });
+    });
+
+    expect(harness.permissionRequests()).toEqual([]);
+    expect(chunks[0]).toMatch(/waiting for an answer to its questions.*in Claude Science/s);
+  });
+});
+
+describe("a request that was answered in Claude Science while the client was asking", () => {
+  it("says that the choice made in the client was not applied", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForFolder();
+    harness.answerPermissions(() => {
+      // The user says no in the browser, and then clicks yes in the client.
+      harness.fake.answerInBrowser(false);
+      return { outcome: "selected", optionId: "allow:rw" };
+    });
+
+    const { chunks, stopReason } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "Analyse my genomes");
+    });
+
+    expect(harness.fake.inputResponses()).toEqual([
+      expect.objectContaining({ approved: false, action: "deny" }),
+    ]);
+    expect(chunks.join("")).toMatch(
+      /already answered in Claude Science.*not applied.*Access denied\./s,
+    );
+    expect(stopReason).toBe("end_turn");
+  });
+});
+
+describe("requests the daemon lists for a conversation that is not waiting", () => {
+  it("are left alone: the list of a turn that has ended is out of date", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+
+    const { chunks } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Analyse my genomes");
+      const [conversation] = harness.fake.conversations();
+      expect(conversation?.status).toBe("completed");
+      const conversationId = await conversationOf(session.sessionId);
+      harness.fake.respondOnce(`GET /api/frames/${conversationId}`, {
+        id: conversationId,
+        status: "completed",
+        agent_name: "OPERON",
+        output_data: {
+          pending_input_requests: [
+            { requestId: "stale", kind: "host", target: "/data/genomes", requested_mode: "rw" },
+          ],
+        },
+      });
+      return runTurn(session, "Are you there?");
+    });
+
+    expect(chunks.join("")).toBe("pong");
+  });
+});
+
+describe("a message the daemon refuses because it waits for an answer csbridge did not find", () => {
+  it("fails with what to do about it", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForFolder();
+    harness.answerPermissions(() => ({ outcome: "cancelled" }));
+
+    const failure = harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Analyse my genomes");
+      // The request is one the frame does not list, as one of a sub-agent may be.
+      const conversationId = await conversationOf(session.sessionId);
+      harness.fake.respondOnce(`GET /api/frames/${conversationId}`, {
+        id: conversationId,
+        status: "awaiting_user_response",
+        agent_name: "OPERON",
+      });
+      return runTurn(session, "Are you there?");
+    });
+
+    await expect(failure).rejects.toThrow(
+      /waiting for an answer.*Answer it in Claude Science, then send your message again/s,
+    );
+  });
+});
+
+/** The conversation a session of the harness's clients belongs to, from the adapter's record. */
+async function conversationOf(sessionId: string): Promise<string> {
+  const record = await readFile(join(harness.stateFolder, "sessions.jsonl"), "utf8");
+  for (const line of record.split("\n").filter(Boolean)) {
+    const pair = JSON.parse(line) as { sessionId: string; conversationId: string };
+    if (pair.sessionId === sessionId) return pair.conversationId;
+  }
+  throw new Error(`no conversation on record for session ${sessionId}`);
+}
 
 /** What a client shows of a form: the question and the choices. */
 function formShown(form: CreateElicitationRequest | undefined) {

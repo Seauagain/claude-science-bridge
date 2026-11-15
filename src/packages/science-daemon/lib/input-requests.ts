@@ -52,9 +52,10 @@ const wires = new WeakMap<InputRequest, Wire>();
 /**
  * Reads the input requests of a `pending_input_requests` list, as a `frame_update` event or a
  * frame's `output_data` carries it. See "Input requests" in docs/protocol.md. Entries that are
- * no requests are left out.
+ * no requests are left out. `holder` is the frame the list belongs to, which is where the
+ * answers go.
  */
-export function parseInputRequests(value: unknown): InputRequest[] {
+export function parseInputRequests(value: unknown, holder: string | undefined): InputRequest[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.requestId !== "string") return [];
@@ -67,7 +68,7 @@ export function parseInputRequests(value: unknown): InputRequest[] {
       choices: choices.map(({ response: _response, ...choice }) => choice),
     };
     wires.set(request, {
-      frameId: typeof entry.frameId === "string" ? entry.frameId : undefined,
+      frameId: holder ?? (typeof entry.frameId === "string" ? entry.frameId : undefined),
       toolId: typeof entry.tool_id === "string" ? entry.tool_id : undefined,
       responses: new Map(choices.map(({ id, response }) => [id, response])),
     });
@@ -79,6 +80,9 @@ export function parseInputRequests(value: unknown): InputRequest[] {
  * Sends the user's answers to the daemon: `POST /frames/<id>/resolve-input`. A turn that
  * stopped to ask carries on by itself once its requests are answered.
  *
+ * Resolves to false when the daemon says the requests had their answers already, from the
+ * browser for example, so that these answers changed nothing.
+ *
  * @throws Error for an answer whose request did not come from {@link parseInputRequests} or
  *   whose choice the request does not have: both are mistakes of the caller.
  */
@@ -86,7 +90,7 @@ export async function answerInputRequests(
   http: DaemonHttp,
   conversationId: string,
   answers: readonly InputAnswer[],
-): Promise<void> {
+): Promise<boolean> {
   const byFrame = new Map<string, JsonRecord[]>();
   for (const { request, choiceId } of answers) {
     const wire = wires.get(request);
@@ -104,11 +108,14 @@ export async function answerInputRequests(
       },
     ]);
   }
+  let applied = true;
   for (const [frameId, responses] of byFrame) {
-    // The daemon answers "already_resolved" for requests that were answered elsewhere in the
-    // meantime, for example in the browser. That is as good as answered.
-    await http.post(`/frames/${encodeURIComponent(frameId)}/resolve-input`, { responses });
+    const answer = await http.post(`/frames/${encodeURIComponent(frameId)}/resolve-input`, {
+      responses,
+    });
+    if (isRecord(answer) && answer.status === "already_resolved") applied = false;
   }
+  return applied;
 }
 
 type Choice = InputChoice & { readonly response: JsonRecord };
@@ -273,10 +280,21 @@ function folderAccess(request: JsonRecord): { question: string; choices: readonl
     lasting: true,
     response: { approved: true, action: "allow", mode, scope: "always" },
   });
+  const target = text(request.target);
+  const wanted = text(request.requested_path);
+  const granted =
+    request.existing_mode === "rw"
+      ? "read and write"
+      : request.existing_mode === "ro"
+        ? "read-only"
+        : undefined;
   return {
-    question: `Access ${text(request.target) ?? "a folder"} on your computer (${
-      writes ? "read and write" : "read-only"
-    })?`,
+    question:
+      `Access ${target ?? "a folder"} on your computer (${
+        writes ? "read and write" : "read-only"
+      })?` +
+      (wanted === undefined || wanted === target ? "" : ` It is asked for ${wanted}.`) +
+      (granted === undefined ? "" : ` The folder has ${granted} access now.`),
     choices: [
       ...(writes ? [allow("rw", "Allow read & write")] : []),
       allow("ro", "Allow read-only"),
@@ -294,7 +312,7 @@ function questionWithChoices(
 ): { question: string; choices: readonly Choice[] } | undefined {
   const questions = Array.isArray(request.questions) ? request.questions : [];
   const [asked] = questions;
-  if (questions.length !== 1 || !isRecord(asked) || asked.multiSelect === true) return undefined;
+  if (questions.length !== 1 || !isRecord(asked) || asked.multi_select === true) return undefined;
   const question = text(asked.question);
   const labels = (Array.isArray(asked.options) ? asked.options : []).flatMap((option) =>
     isRecord(option) && typeof option.label === "string" ? [option.label] : [],

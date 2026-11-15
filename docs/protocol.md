@@ -114,8 +114,10 @@ on the user's computer, or a question.
   - allow anything else: `approved: true, action: "allow"`, with `scope: "conversation" |
     "project" | "always"` to have it remembered and no `scope` for this once. **[web]**
   - a question (`kind: "ask"`, with `questions: [{ question, header, options: [{ label,
-    description }], multiSelect }]`): `approved: true, action: "answer", answers: { <question>:
-    <label> }`, or `approved: false, action: "cancel"` to skip it. **[web]**
+    description }], multi_select }]`): `approved: true, action: "answer", answers: { <question>:
+    <label> }`, or `approved: false, action: "cancel"` to skip it. The web client shows the
+    first question only, sends several picked labels joined with ", " and sends text the user
+    typed as it is. **[web]**
 - The answer to `resolve-input` is `{ root_frame_id, frame_id, status: "accepted",
   race_lost_refusals: [], remaining_tool_ids: [] }`. The turn then carries on by itself: the
   frame is `processing` again at once and ends as any turn does. Answering requests that are
@@ -130,6 +132,10 @@ on the user's computer, or a question.
   once), `skill_license` (project, always), and without scopes `managed_endpoint_register`,
   `set_goal` and `usage_checkpoint`. The kinds `credential_request`, `ssh_password`,
   `provider_discovery` and `contact_email` take text the user types. **[web]**
+- The web client sends the answers to the frame that holds the list, which for a sub-agent's
+  request is the sub-agent's frame, and counts a list only on a frame whose status is
+  `awaiting_user_response` or `processing`: a frame's `output_data` can hold what a turn that
+  ended left behind. **[web]**
 - Not observed: a request raised while the frame stays `processing` (`mode` other than
   `"parked"`), a request of a sub-agent frame, and what a cancel does to a turn that stopped
   to ask. The fake daemon raises parked requests only and drops them with a cancelled turn.

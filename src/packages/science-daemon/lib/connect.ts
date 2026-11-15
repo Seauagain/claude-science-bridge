@@ -4,6 +4,7 @@ import { unlessCancelled } from "./cancellation.ts";
 import { readConversationState, readInputRequests } from "./conversation-state.ts";
 import { type Conversation, listConversations } from "./conversations.ts";
 import { locateDaemon } from "./endpoint.ts";
+import { ScienceDaemonError } from "./errors.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { answerInputRequests, type InputAnswer, type InputRequest } from "./input-requests.ts";
 import { logIn } from "./login.ts";
@@ -96,7 +97,9 @@ export interface ScienceDaemon {
    * {@link Turn.events}. A model named in `settings` is used from this message on; an effort is
    * not, because the daemon keeps the effort a conversation started with.
    *
-   * @throws ScienceDaemonError as {@link ScienceDaemon.startConversation} does.
+   * @throws ScienceDaemonError as {@link ScienceDaemon.startConversation} does, and with kind
+   *   `awaiting-answer` when the daemon takes no message because it waits for an answer that
+   *   {@link ScienceDaemon.waitingTurn} does not report, as for a request of a sub-agent.
    */
   sendMessage(
     conversationId: string,
@@ -115,11 +118,12 @@ export interface ScienceDaemon {
   waitingTurn(conversationId: string, cancel: AbortSignal): Promise<Turn | undefined>;
   /**
    * Gives the daemon the user's answers to input requests of a conversation's turn, which then
-   * goes on. Requests that were answered elsewhere in the meantime are left as they are.
+   * goes on. Resolves to false when the requests had their answers already, from the browser
+   * for example: these answers then changed nothing.
    *
    * @throws ScienceDaemonError when the daemon refuses the answers or cannot be reached.
    */
-  answerInputRequests(conversationId: string, answers: readonly InputAnswer[]): Promise<void>;
+  answerInputRequests(conversationId: string, answers: readonly InputAnswer[]): Promise<boolean>;
   /**
    * Closes the connection for good and stops every attempt to restore it. Turns still running
    * stop producing events.
@@ -214,15 +218,17 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
           await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
           frameCall,
         );
-        await http.post("/request", {
-          target_agent: expectString(frame, "agent_name", frameCall),
-          root_frame_id: conversationId,
-          frame_id: conversationId,
-          plan_mode: false,
-          intent_id: randomUUID(),
-          input_data: { request: message },
-          ...(settings.model === undefined ? {} : { model: settings.model }),
-        });
+        await http
+          .post("/request", {
+            target_agent: expectString(frame, "agent_name", frameCall),
+            root_frame_id: conversationId,
+            frame_id: conversationId,
+            plan_mode: false,
+            intent_id: randomUUID(),
+            input_data: { request: message },
+            ...(settings.model === undefined ? {} : { model: settings.model }),
+          })
+          .catch(rethrowAwaitingAnswer);
         return conversationId;
       }),
     waitingTurn: (conversationId, cancel) =>
@@ -232,10 +238,30 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
       }),
     async answerInputRequests(conversationId, answers) {
       await socket.ready();
-      await answerInputRequests(http, conversationId, answers);
+      return answerInputRequests(http, conversationId, answers);
     },
     close: () => socket.close(),
   };
+}
+
+/**
+ * Turns the daemon's refusal of a message for a conversation that waits for an answer into an
+ * error that says what to do. See "Input requests" in docs/protocol.md.
+ */
+function rethrowAwaitingAnswer(error: unknown): never {
+  if (
+    error instanceof ScienceDaemonError &&
+    error.kind === "rejected" &&
+    error.message.includes("answer the pending question")
+  ) {
+    throw new ScienceDaemonError(
+      "awaiting-answer",
+      "Claude Science is waiting for an answer to something it asked, and csbridge cannot " +
+        "show what it is. Answer it in Claude Science, then send your message again.",
+      { cause: error },
+    );
+  }
+  throw error;
 }
 
 /** What sending a message and following its turn needs of the connection. */
