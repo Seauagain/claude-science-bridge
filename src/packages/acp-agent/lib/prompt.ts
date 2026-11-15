@@ -5,10 +5,15 @@ import {
   type PromptResponse,
   RequestError,
 } from "@agentclientprotocol/sdk";
-import type { ScienceDaemon, Turn } from "../../science-daemon/index.ts";
+import {
+  type ScienceDaemon,
+  ScienceDaemonError,
+  type TranscriptEntry,
+  type Turn,
+} from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FolderProjects } from "./folder-project.ts";
-import { HISTORY_COMMAND, historyText } from "./history.ts";
+import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
 import { promptText } from "./prompt-text.ts";
 import type { SessionRecord } from "./session-record.ts";
 
@@ -58,8 +63,13 @@ export async function answerPrompt(
     );
   }
 
-  if (promptText(request.prompt).trim() === `/${HISTORY_COMMAND.name}`) {
+  const text = promptText(request.prompt).trim();
+  if (text === `/${HISTORY_COMMAND.name}`) {
     return showHistory(session, request, surroundings).catch(rethrowAsRequestError);
+  }
+  const opened = new RegExp(`^/${OPEN_COMMAND.name}\\s+(\\S+)$`).exec(text)?.[1];
+  if (opened !== undefined) {
+    return openConversation(session, opened, request, surroundings).catch(rethrowAsRequestError);
   }
 
   const cancel = new AbortController();
@@ -96,6 +106,42 @@ export async function answerPrompt(
 }
 
 /**
+ * Answers the open command: ties the session to a conversation that exists already, so that the
+ * thread continues it, and shows its earlier messages. Nothing is sent to Claude Science.
+ */
+async function openConversation(
+  session: Session,
+  conversationId: string,
+  request: PromptRequest,
+  surroundings: PromptSurroundings,
+): Promise<PromptResponse> {
+  if (session.conversationId !== undefined) {
+    throw new RequestError(
+      INVALID_REQUEST,
+      "This thread already has a conversation, and a thread holds one conversation. " +
+        "Open the other conversation in a new thread.",
+    );
+  }
+  // Reading the transcript first proves that the conversation exists before anything is kept.
+  const transcript = await (await surroundings.daemon())
+    .readTranscript(conversationId)
+    .catch((error: unknown) => {
+      if (error instanceof ScienceDaemonError && error.kind === "not-found") {
+        throw new RequestError(
+          INVALID_REQUEST,
+          `There is no conversation "${conversationId}" in Claude Science.`,
+        );
+      }
+      throw error;
+    });
+  session.conversationId = conversationId;
+  // On record, the conversation is this thread's: it is no longer offered for import, and
+  // another adapter process can load the session.
+  await surroundings.record.remember(request.sessionId, conversationId);
+  return showTranscript(transcript, request, surroundings);
+}
+
+/**
  * Answers the history command: shows the conversation's earlier messages as reply text. Nothing
  * is sent to Claude Science, so this costs the user nothing.
  */
@@ -108,6 +154,15 @@ async function showHistory(
     session.conversationId === undefined
       ? []
       : await (await daemon()).readTranscript(session.conversationId);
+  return showTranscript(transcript, request, { client });
+}
+
+/** Sends a transcript to the client as the reply of a turn. */
+async function showTranscript(
+  transcript: readonly TranscriptEntry[],
+  request: PromptRequest,
+  { client }: Pick<PromptSurroundings, "client">,
+): Promise<PromptResponse> {
   const pieces = historyText(transcript);
   for (const text of pieces.length === 0 ? ["This thread has no earlier messages."] : pieces) {
     await client.notify(methods.client.session.update, {

@@ -34,6 +34,16 @@ export const HISTORY_COMMAND = {
 } as const;
 
 /**
+ * The command that makes a new thread continue a conversation that exists already. It is how a
+ * conversation is brought into a client without the client's own import.
+ */
+export const OPEN_COMMAND = {
+  name: "open",
+  description: "Continue an existing conversation in this thread and show its earlier messages",
+  input: { hint: "conversation identifier" },
+} as const;
+
+/**
  * Renders a conversation's transcript as Markdown for reading in a thread, in pieces to send
  * one after the other: a heading whenever the speaker changes, then what was said. A tool use is
  * a line of its own. Clients do not show the history that is replayed when a session is loaded,

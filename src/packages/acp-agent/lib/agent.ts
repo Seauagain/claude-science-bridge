@@ -11,7 +11,7 @@ import { findProjectLink } from "../../project-link/index.ts";
 import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
 import { rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
-import { HISTORY_COMMAND, historyUpdates } from "./history.ts";
+import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
 
@@ -146,6 +146,9 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
 async function offerCommands(client: AgentContext, sessionId: string): Promise<void> {
   await client.notify(methods.client.session.update, {
     sessionId,
-    update: { sessionUpdate: "available_commands_update", availableCommands: [HISTORY_COMMAND] },
+    update: {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [HISTORY_COMMAND, OPEN_COMMAND],
+    },
   });
 }

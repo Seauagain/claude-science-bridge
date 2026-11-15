@@ -109,7 +109,7 @@ describe("the commands a session offers", () => {
   const offersHistory = expect.arrayContaining([
     expect.objectContaining({
       sessionUpdate: "available_commands_update",
-      availableCommands: [expect.objectContaining({ name: "history" })],
+      availableCommands: expect.arrayContaining([expect.objectContaining({ name: "history" })]),
     }),
   ]);
 
