@@ -214,6 +214,19 @@ there is none. The fake daemon behaves as described here.
   In a turn with several assistant messages (tool use), only the last one is read this way: text
   of earlier messages that was streamed during or after the gap is not delivered.
 
+### What the adapter does when the daemon is silent
+
+Nothing in this section was observed on the real daemon; the fake daemon invented each behaviour.
+
+- **A daemon that does not answer.** The adapter gives every HTTP request, each login request and
+  the socket handshake 30 s and treats a request that runs out of time as `unreachable`. The fake
+  can stop answering while still accepting connections. Whether `claude-science status` reports a
+  daemon that hangs as running is not known. **[open]**
+- **Cancel without confirmation.** After `POST /frames/<R>/cancel` the adapter waits 10 s for the
+  terminal `frame_update`, counted from the client's cancel, and then ends the turn as cancelled on
+  its own. The fake can answer a cancel as usual and leave the turn running. Whether the real
+  daemon ever does that is not known. **[open]**
+
 ## Open questions
 
 1. Can a conversation be started without a project? **[open]**
@@ -237,3 +250,6 @@ there is none. The fake daemon behaves as described here.
 8. The shape of a message's content blocks, when a streamed message enters the transcript, and
    how the text of a turn with several assistant messages relates to its `text_chunk` events.
    See "Recovery". **[open]**
+9. What the daemon answers to `POST /request` for a conversation whose turn is still `processing`.
+   This can happen after a cancel that was not confirmed in time or could not be delivered. The
+   fake refuses it with 400. **[open]**
