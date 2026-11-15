@@ -1,6 +1,7 @@
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
+import { listProjects, type Project } from "./projects.ts";
 import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonEvent, openDaemonSocket } from "./socket.ts";
 import { type Turn, TurnTracker } from "./turn.ts";
@@ -8,6 +9,12 @@ import { expectRecord, expectString } from "./validate.ts";
 
 /** A logged-in connection to the local Claude Science daemon. */
 export interface ScienceDaemon {
+  /**
+   * Lists the user's projects that are not archived, in the daemon's order.
+   *
+   * @throws ScienceDaemonError when the daemon cannot be reached or answers unexpectedly.
+   */
+  listProjects(): Promise<Project[]>;
   /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
    *
@@ -41,6 +48,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   const socket = await openDaemonSocket(endpoint, login, expectString(me, "user_id", "GET /me"));
 
   return {
+    listProjects: () => listProjects(http),
     async startConversation(projectId, message) {
       const call = "POST /projects/<id>/request";
       // The turn's first events can arrive before the response that names the conversation,
