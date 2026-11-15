@@ -15,7 +15,7 @@ const TIME_LIMIT_MS = 10_000;
  * like work that has just finished.
  *
  * Works in T3 Code, which hands every session an MCP server for this and does not take a
- * session's options from the session itself. In any other client, and whenever a request does
+ * thread's model and options from what the session reports. In any other client, and whenever a request does
  * not go through, nothing happens: the thread is merely left as the client made it. The
  * server's environment carries the client's own authorization, which is passed on to the
  * server and to nothing else.
@@ -33,25 +33,24 @@ export async function arrangeClientThread(
 }
 
 /**
- * Adds the conversation's model and effort to the thread's options. The provider and model
- * the client gave the thread stay as they are: T3 Code refuses a change of model on a thread
- * that has no session bound to it, and accepts a change of options at any time.
+ * Makes the conversation's model the thread's model, and its effort an option of the thread.
+ * The thread stays with the provider the client gave it.
+ *
+ * This has to happen while the thread's session is live: T3 Code refuses a change of model on
+ * a thread that has no session bound to it, and unbinds the session when the thread settles.
  */
 async function showSettings(server: ToolServer, settings: ConversationSettings): Promise<void> {
-  const options = [
-    ...(settings.model === undefined ? [] : [{ id: "model", value: settings.model }]),
-    ...(settings.effort === undefined ? [] : [{ id: "effort", value: settings.effort }]),
-  ];
-  if (options.length === 0) return;
+  if (settings.model === undefined) return;
   const current = threadSelection(await callTool(server, "t3_thread_configure", {}));
   if (current === undefined) return;
-  await callTool(server, "t3_thread_configure", { modelSelection: { ...current, options } });
+  const options = settings.effort === undefined ? [] : [{ id: "effort", value: settings.effort }];
+  await callTool(server, "t3_thread_configure", {
+    modelSelection: { instanceId: current.instanceId, model: settings.model, options },
+  });
 }
 
-/** Reads the provider and model of a thread from what `t3_thread_configure` answers. */
-function threadSelection(
-  answer: string | undefined,
-): { instanceId: string; model: string } | undefined {
+/** Reads the provider of a thread from what `t3_thread_configure` answers. */
+function threadSelection(answer: string | undefined): { instanceId: string } | undefined {
   if (answer === undefined) return undefined;
   let parsed: unknown;
   try {
@@ -61,10 +60,8 @@ function threadSelection(
   }
   const selection = isRecord(parsed) ? parsed.modelSelection : undefined;
   if (!isRecord(selection)) return undefined;
-  const { instanceId, model } = selection;
-  return typeof instanceId === "string" && typeof model === "string"
-    ? { instanceId, model }
-    : undefined;
+  const { instanceId } = selection;
+  return typeof instanceId === "string" ? { instanceId } : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -110,8 +110,8 @@ async function bringIn(
 }
 
 /**
- * T3 Code's name for "whatever model the agent runs on". The opened conversation keeps its own
- * model, and T3 Code shows that among the thread's options, where it can always be changed.
+ * T3 Code's name for "whatever model the agent runs on". The thread starts on it; opening the
+ * conversation then gives the thread the conversation's own model.
  */
 const AGENTS_OWN_MODEL = "default";
 

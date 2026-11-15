@@ -71,7 +71,7 @@ describe("the /open command, in a session that has no conversation yet", () => {
         current: option.type === "select" ? option.currentValue : undefined,
       })),
     ).toEqual([
-      { id: "model", current: "model-small" },
+      { id: "claude_science_model", current: "model-small" },
       { id: "effort", current: "low" },
     ]);
   });

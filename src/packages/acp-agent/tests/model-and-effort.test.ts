@@ -53,7 +53,7 @@ describe("the model and effort a session offers", () => {
 
     expect(summary(opened.configOptions)).toEqual([
       {
-        id: "model",
+        id: "claude_science_model",
         category: "model",
         current: "model-large",
         choices: ["model-large=Large", "model-small=Small", "model-basic=Basic"],
@@ -73,7 +73,7 @@ describe("the model and effort a session offers", () => {
     const changed = await harness.withClient(async (context) => {
       const { sessionId } = await openSession(context, folder);
       await choose(context, sessionId, "effort", "max");
-      return choose(context, sessionId, "model", "model-small");
+      return choose(context, sessionId, "claude_science_model", "model-small");
     });
 
     expect(summary(changed.configOptions)[1]).toEqual({
@@ -89,10 +89,12 @@ describe("the model and effort a session offers", () => {
 
     const changed = await harness.withClient(async (context) => {
       const { sessionId } = await openSession(context, folder);
-      return choose(context, sessionId, "model", "model-basic");
+      return choose(context, sessionId, "claude_science_model", "model-basic");
     });
 
-    expect(summary(changed.configOptions).map((option) => option.id)).toEqual(["model"]);
+    expect(summary(changed.configOptions).map((option) => option.id)).toEqual([
+      "claude_science_model",
+    ]);
   });
 
   it("refuse a model the daemon does not offer, naming the ones it does", async () => {
@@ -100,7 +102,7 @@ describe("the model and effort a session offers", () => {
 
     const failure = harness.withClient(async (context) => {
       const { sessionId } = await openSession(context, folder);
-      return choose(context, sessionId, "model", "model-imaginary");
+      return choose(context, sessionId, "claude_science_model", "model-imaginary");
     });
 
     await expect(failure).rejects.toThrow(
@@ -115,7 +117,7 @@ describe("a conversation", () => {
 
     await harness.withClient(async (context) => {
       const { sessionId } = await openSession(context, folder);
-      await choose(context, sessionId, "model", "model-small");
+      await choose(context, sessionId, "claude_science_model", "model-small");
       await choose(context, sessionId, "effort", "medium");
       return prompt(context, sessionId, "What is the fold of GFP?");
     });
@@ -144,7 +146,7 @@ describe("a conversation", () => {
     await harness.withClient(async (context) => {
       const { sessionId } = await openSession(context, folder);
       await prompt(context, sessionId, "What is the fold of GFP?");
-      await choose(context, sessionId, "model", "model-small");
+      await choose(context, sessionId, "claude_science_model", "model-small");
       return prompt(context, sessionId, "How many strands?");
     });
 
@@ -187,85 +189,24 @@ describe("a conversation that is loaded", () => {
     );
 
     expect(summary(loaded?.configOptions).map(({ id, current }) => ({ id, current }))).toEqual([
-      { id: "model", current: "model-small" },
+      { id: "claude_science_model", current: "model-small" },
       { id: "effort", current: "low" },
     ]);
   });
 });
 
-// T3 Code refuses a change of model on a thread that has no session bound to it, which is every
-// thread that was settled or only imported. It takes a change of any other option at any time.
-describe("the model, for T3 Code", () => {
-  it.each(["t3-code", "t3-code-provider-test", "t3-code-session-manager"])(
-    "is an option like any other for the client %s, so that it can always be changed",
-    async (clientName) => {
-      const { folder } = await harness.linkedFolder("Protein folding");
-
-      const opened = await harness.withClient((context) => openSession(context, folder), {
-        clientName,
-      });
-
-      expect(summary(opened.configOptions)).toEqual([
-        {
-          id: "model",
-          category: undefined,
-          current: "model-large",
-          choices: ["model-large=Large", "model-small=Small", "model-basic=Basic"],
-        },
-        {
-          id: "effort",
-          category: "thought_level",
-          current: "medium",
-          choices: ["low=Low", "medium=Medium", "high=High", "max=Max"],
-        },
-      ]);
-    },
-  );
-
-  it("is chosen the same way, and stays a plain option in what is sent back", async () => {
+describe("the model option", () => {
+  // T3 Code keeps a thread's option choices by identifier and sends them again after it has
+  // applied the thread's model. A version of csbridge that was never released offered T3 Code
+  // a plain option called "model"; a choice left over from it must not override the model.
+  it('is not called "model", and a choice made under that name is refused', async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
 
-    const changed = await harness.withClient(
-      async (context) => {
-        const { sessionId } = await openSession(context, folder);
-        const answer = await choose(context, sessionId, "model", "model-small");
-        await prompt(context, sessionId, "What is the fold of GFP?");
-        return answer;
-      },
-      { clientName: "t3-code" },
-    );
-
-    expect(summary(changed.configOptions)[0]).toMatchObject({
-      id: "model",
-      category: undefined,
-      current: "model-small",
-    });
-    expect(harness.fake.conversationSettings()[0]?.model).toBe("model-small");
-  });
-
-  it("is a plain option for a conversation that is loaded, too", async () => {
-    const { folder, projectId } = await harness.linkedFolder("Protein folding");
-    const conversationId = harness.fake.addConversation(projectId, {
-      title: "Fold of GFP",
-      updatedAt: "2026-11-02T10:00:00Z",
-      model: "model-small",
-      effort: "low",
+    const failure = harness.withClient(async (context) => {
+      const { sessionId } = await openSession(context, folder);
+      return choose(context, sessionId, "model", "model-small");
     });
 
-    const loaded = await harness.withClient(
-      (context) =>
-        context.request(methods.agent.session.load, {
-          sessionId: conversationId,
-          cwd: folder,
-          mcpServers: [],
-        }),
-      { clientName: "t3-code" },
-    );
-
-    expect(summary(loaded?.configOptions)[0]).toMatchObject({
-      id: "model",
-      category: undefined,
-      current: "model-small",
-    });
+    await expect(failure).rejects.toThrow(/no option "model"/);
   });
 });

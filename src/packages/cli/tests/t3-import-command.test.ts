@@ -93,9 +93,9 @@ describe("csbridge t3-import", () => {
       { title: "CS-Protein folding", folder: join(folder, "Protein folding") },
       { title: "CS-Climate model", folder: join(folder, "Climate model") },
     ]);
-    // Oldest first, so that the newest conversation ends up as the most recent thread. To T3
-    // Code the model is "default", its name for whatever the agent runs on: the opened
-    // conversation keeps its own model, which T3 Code shows among the thread's options.
+    // Oldest first, so that the newest conversation ends up as the most recent thread. A
+    // thread starts on "default", T3 Code's name for whatever the agent runs on; opening the
+    // conversation then gives the thread the conversation's own model.
     expect(t3.started()).toEqual([
       {
         title: "Fold of GFP",

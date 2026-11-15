@@ -102,8 +102,8 @@ describe("a thread that opens an existing conversation, in a client that lets ag
       return prompt(context, sessionId, `/open ${conversationId}`);
     });
 
-    // The thread keeps the provider and model the client gave it; the conversation's own
-    // model and effort become options of the thread.
+    // The thread stays with the provider the client gave it, and takes the conversation's
+    // model as its model and the conversation's effort as an option.
     expect(await tools.received()).toEqual([
       { name: "t3_thread_configure", arguments: {} },
       {
@@ -111,11 +111,8 @@ describe("a thread that opens an existing conversation, in a client that lets ag
         arguments: {
           modelSelection: {
             instanceId: "claudeScience",
-            model: "default",
-            options: [
-              { id: "model", value: "model-small" },
-              { id: "effort", value: "low" },
-            ],
+            model: "model-small",
+            options: [{ id: "effort", value: "low" }],
           },
         },
       },
@@ -145,11 +142,7 @@ describe("a thread that opens an existing conversation, in a client that lets ag
       {
         name: "t3_thread_configure",
         arguments: {
-          modelSelection: {
-            instanceId: "claudeScience",
-            model: "default",
-            options: [{ id: "model", value: "model-basic" }],
-          },
+          modelSelection: { instanceId: "claudeScience", model: "model-basic", options: [] },
         },
       },
       { name: "t3_thread_organize", arguments: { action: "settle" } },

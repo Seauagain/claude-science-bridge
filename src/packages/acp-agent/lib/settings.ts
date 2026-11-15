@@ -1,10 +1,16 @@
 import { RequestError, type SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { ConversationSettings, Model, ModelCatalog } from "../../science-daemon/index.ts";
-import type { ClientTraits } from "./client-traits.ts";
 import { INVALID_PARAMS } from "./errors.ts";
 
-/** The identifiers of the options a session offers its client. */
-const MODEL_OPTION = "model";
+/**
+ * The identifiers of the options a session offers its client.
+ *
+ * The model's is not plainly "model". T3 Code keeps a thread's option choices by identifier
+ * and sends them again after it has applied the thread's model. A version of csbridge that
+ * was never released offered T3 Code a plain option called "model", and a choice left over
+ * from it on a thread would silently override the model the user picks.
+ */
+const MODEL_OPTION = "claude_science_model";
 const EFFORT_OPTION = "effort";
 
 /**
@@ -40,13 +46,11 @@ export function settingsInForce(
 
 /**
  * The options a client shows for a session: the model, and the effort when the model in force
- * takes one. Clients read the category to tell which is which; a client whose traits say so
- * gets the model without one, as an option like any other.
+ * takes one. Clients read the category to tell which is which.
  */
 export function settingsOptions(
   catalog: ModelCatalog,
   session: SessionSettings,
-  traits: Pick<ClientTraits, "modelIsPlainOption">,
 ): SessionConfigOption[] {
   const model = modelInForce(catalog, session);
   if (model === undefined) return [];
@@ -55,7 +59,7 @@ export function settingsOptions(
     {
       id: MODEL_OPTION,
       name: "Model",
-      ...(traits.modelIsPlainOption ? {} : { category: "model" as const }),
+      category: "model",
       type: "select",
       currentValue: model.id,
       options: catalog.models.map(({ id, name }) => ({ value: id, name })),
