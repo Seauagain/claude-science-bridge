@@ -90,3 +90,26 @@ describe("loading a session that an earlier adapter process opened", () => {
     await expect(loading).rejects.toMatchObject({ code: -32002, data: { sessionId } });
   });
 });
+
+describe("loading a session in the adapter process that opened it", () => {
+  it("replays its history and leaves the session on its conversation", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+
+    const history = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "What is the fold of GFP?");
+      const loaded = await loadSession(harness, context, session.sessionId, folder);
+      await runTurn(session, "How many strands?");
+      return loaded.history;
+    });
+
+    expect(history).toEqual([userText("What is the fold of GFP?"), replyText("pong")]);
+    expect(harness.fake.conversations()).toEqual([
+      {
+        projectId,
+        messages: ["What is the fold of GFP?", "How many strands?"],
+        status: "completed",
+      },
+    ]);
+  });
+});

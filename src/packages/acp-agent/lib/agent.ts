@@ -17,8 +17,9 @@ import { openSessionRecord } from "./session-record.ts";
 /** What {@link createScienceAgent} needs. */
 export interface ScienceAgentOptions {
   /**
-   * Connects to the daemon. Called when the first session is opened, and again after a failed
-   * attempt, so the agent starts even when the daemon is not running yet.
+   * Connects to the daemon. Called when the daemon is first needed, which is when a session is
+   * opened, loaded or listed, and again after a failed attempt, so the agent starts even when
+   * the daemon is not running yet.
    */
   readonly connectDaemon: () => Promise<ScienceDaemon>;
   /**
