@@ -116,7 +116,9 @@ to get a `csbridge` command.
    Every project gets a linked sub-folder and a T3 project named `CS-<project>`, and every
    conversation gets a thread that carries the conversation's own model and effort. Each thread shows the earlier
    messages and is already settled, so the import does not fill your list of finished work. Run
-   the command again whenever you like: it brings in only what is new. `--prefix` changes the
+   the command again whenever you like: it brings in only what is new. While it runs, T3 Code
+   shows each conversation as working for about a second: every thread is opened by a short
+   turn, which is what makes its history visible. `--prefix` changes the
    `CS-` in front of the project names, and `--provider` names the provider instance if yours
    is not called `claudeScience`.
 
