@@ -23,7 +23,8 @@ export interface ScienceAgentOptions {
 
 /** An ACP session: the client's handle on at most one conversation. */
 interface Session {
-  readonly projectId: string;
+  /** The session's working folder. The project it is linked to gets the conversation. */
+  readonly cwd: string;
   /** Set by the first prompt, which creates the conversation. */
   conversationId?: string;
   /**
@@ -34,7 +35,6 @@ interface Session {
 }
 
 const INVALID_REQUEST = -32600;
-const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
 
 /**
@@ -70,20 +70,32 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       authMethods: [],
     }))
     .onRequest(methods.agent.session.new, async ({ params }) => {
-      const link = await findProjectLink(params.cwd).catch(rethrowAsRequestError);
-      if (link === undefined) {
-        throw new RequestError(
-          INVALID_PARAMS,
-          `${params.cwd} is not linked to a Claude Science project. ` +
-            'Run "csbridge link --project <name>" in that folder, then start a new session.',
-        );
-      }
       // Connect now, so that a setup problem is reported when the session is opened rather than
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
-      sessions.set(sessionId, { projectId: link.projectId });
+      sessions.set(sessionId, { cwd: params.cwd });
       return { sessionId };
+    })
+    .onRequest(methods.agent.session.list, async ({ params }) => {
+      const folder = params.cwd;
+      // Sessions are listed per folder: the conversations of the project it is linked to.
+      if (folder === undefined || folder === null) return { sessions: [] };
+      try {
+        const link = await findProjectLink(folder);
+        if (link === undefined) return { sessions: [] };
+        const conversations = await (await daemon()).listConversations(link.projectId);
+        return {
+          sessions: conversations.map((conversation) => ({
+            sessionId: conversation.conversationId,
+            cwd: folder,
+            title: conversation.title,
+            updatedAt: conversation.updatedAt,
+          })),
+        };
+      } catch (error) {
+        return rethrowAsRequestError(error);
+      }
     })
     .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessions.get(params.sessionId);
@@ -100,11 +112,14 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       session.activePrompt = cancel;
       try {
         const message = promptText(params.prompt);
-        const science = await daemon();
         const turn =
           session.conversationId === undefined
-            ? await science.startConversation(session.projectId, message, cancel.signal)
-            : await science.sendMessage(session.conversationId, message, cancel.signal);
+            ? await (await daemon()).startConversation(
+                await linkedProjectId(session.cwd),
+                message,
+                cancel.signal,
+              )
+            : await (await daemon()).sendMessage(session.conversationId, message, cancel.signal);
         session.conversationId = turn.conversationId;
         // Once the client has cancelled, the turn has no more reply text and ends as cancelled.
         for await (const event of turn.events) {
@@ -141,6 +156,21 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       // Nothing happens when no prompt is being answered or this one is cancelled already.
       sessions.get(params.sessionId)?.activePrompt?.abort();
     });
+}
+
+/**
+ * The project a session's working folder is linked to. The link is looked up when the first
+ * prompt arrives, not when the session is opened: a client opens sessions in folders of its
+ * own choosing just to find out what the agent can do.
+ */
+async function linkedProjectId(folder: string): Promise<string> {
+  const link = await findProjectLink(folder);
+  if (link !== undefined) return link.projectId;
+  throw new RequestError(
+    INVALID_REQUEST,
+    `${folder} is not linked to a Claude Science project. ` +
+      'Run "csbridge link --project <name>" in that folder, then send the prompt again.',
+  );
 }
 
 /** Passes protocol errors through and turns this project's own errors into protocol errors. */

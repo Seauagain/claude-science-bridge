@@ -45,12 +45,15 @@ describe("opening a session", () => {
     expect(sessionId).not.toBe("");
   });
 
-  it("refuses a folder that is not linked, saying how to link it", async () => {
+  it("opens a session in a folder that is not linked to a project", async () => {
     const folder = await harness.unlinkedFolder();
 
-    const opening = harness.withClient((context) => context.buildSession(folder).start());
+    const sessionId = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return session.sessionId;
+    });
 
-    await expect(opening).rejects.toThrow(/not linked to a Claude Science project.*csbridge link/s);
+    expect(sessionId).not.toBe("");
   });
 
   it("does not start a conversation until a prompt is sent", async () => {

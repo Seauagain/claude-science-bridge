@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream";
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
 import {
+  type ExistingConversation,
   type FakeConversation,
   FakeConversations,
   type ReplyScript,
@@ -11,7 +12,8 @@ import {
 import { FakeEventSockets } from "./fake-event-sockets.ts";
 import { FakeLogins } from "./fake-logins.ts";
 import type { FakeScienceDaemon } from "./fake-science-daemon.ts";
-import { type Answer, readBody, sendJson } from "./http-exchange.ts";
+import { type Answer, readBody, sendJson, undocumented } from "./http-exchange.ts";
+import { TIMESTAMP } from "./stored-conversation.ts";
 
 interface Project {
   readonly name: string;
@@ -21,7 +23,6 @@ interface Project {
 
 /** The daemon version docs/protocol.md was observed on. */
 const OBSERVED_VERSION = "0.1.53";
-const TIMESTAMP = "2026-11-15T08:00:00Z";
 
 /**
  * Starts a fake daemon on a free loopback port and resolves once it listens. It starts out with
@@ -114,6 +115,13 @@ class FakeDaemon implements FakeScienceDaemon {
     const projectId = `proj_${randomBytes(6).toString("hex")}`;
     this.#projects.set(projectId, { name, archivedAt: options.archived ? TIMESTAMP : null });
     return projectId;
+  }
+
+  addConversation(projectId: string, conversation: ExistingConversation): string {
+    if (!this.#projects.has(projectId)) {
+      throw new Error(`fake daemon: there is no project ${projectId} to add a conversation to`);
+    }
+    return this.#conversations.add(projectId, conversation);
   }
 
   onNextMessage(script: ReplyScript): void {
@@ -209,6 +217,12 @@ class FakeDaemon implements FakeScienceDaemon {
   async #answer(route: string, url: URL, request: IncomingMessage): Promise<Answer> {
     if (route === "GET /api/me") return { status: 200, body: { user_id: "fake-user" } };
     if (route === "GET /api/projects") return this.#listProjects();
+    if (route === "GET /api/frames") {
+      // What the daemon answers for a project it does not know is not recorded.
+      return this.#projects.has(url.searchParams.get("project_id") ?? "")
+        ? this.#conversations.listFrames(url.searchParams)
+        : undocumented("project_id names no project");
+    }
     if (route === "POST /api/request") {
       return this.#conversations.sendFurtherMessage(JSON.parse(await readBody(request)));
     }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DaemonAccess } from "./access.ts";
 import { unlessCancelled } from "./cancellation.ts";
 import { readConversationState } from "./conversation-state.ts";
+import { type Conversation, listConversations } from "./conversations.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
@@ -28,6 +29,14 @@ export interface ScienceDaemon {
    * @throws ScienceDaemonError when the daemon cannot be reached or answers unexpectedly.
    */
   listProjects(): Promise<Project[]>;
+  /**
+   * Lists the conversations of a project that the user sees, newest first. Conversations the
+   * daemon hides and the project's other frames, such as its uploads, are left out.
+   *
+   * @throws ScienceDaemonError when the daemon cannot be reached, refuses the request (as it
+   *   may for a project it does not know) or answers unexpectedly.
+   */
+  listConversations(projectId: string): Promise<Conversation[]>;
   /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
    * Aborting `cancel` stops the reply: see {@link Turn.events}.
@@ -99,6 +108,10 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
     async listProjects() {
       await socket.ready();
       return listProjects(http);
+    },
+    async listConversations(projectId) {
+      await socket.ready();
+      return listConversations(http, projectId);
     },
     startConversation: (projectId, message, cancel) =>
       startTurn(channel, cancel, async () => {

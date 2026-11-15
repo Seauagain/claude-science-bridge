@@ -7,6 +7,19 @@ export interface Answer {
   readonly body: unknown;
 }
 
+/**
+ * Refuses a request that docs/protocol.md does not cover, instead of answering it with invented
+ * behaviour, so that code relying on something nobody observed fails its tests.
+ */
+export function undocumented(problem: string): Answer {
+  return {
+    status: 400,
+    body: {
+      detail: `fake daemon: ${problem}; docs/protocol.md does not say how the daemon answers that`,
+    },
+  };
+}
+
 export function parseCookies(request: IncomingMessage): Map<string, string> {
   const cookies = new Map<string, string>();
   for (const pair of (request.headers.cookie ?? "").split(";")) {
