@@ -8,6 +8,7 @@ export type {
   FakeConversation,
   FakeTurn,
   ReplyScript,
-} from "./lib/fake/fake-conversations.ts";
+} from "./lib/fake/fake-conversation.ts";
 export { startFakeScienceDaemon } from "./lib/fake/fake-daemon.ts";
+export type { FakeProject } from "./lib/fake/fake-projects.ts";
 export type { FakeScienceDaemon } from "./lib/fake/fake-science-daemon.ts";

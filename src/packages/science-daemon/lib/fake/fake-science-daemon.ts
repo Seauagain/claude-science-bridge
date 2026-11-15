@@ -1,6 +1,7 @@
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
-import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversations.ts";
+import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversation.ts";
+import type { FakeProject } from "./fake-projects.ts";
 
 /** A stand-in for the Claude Science daemon that implements docs/protocol.md. */
 export interface FakeScienceDaemon {
@@ -36,6 +37,8 @@ export interface FakeScienceDaemon {
 
   /** Creates a project, archived if asked, and returns its identifier. */
   addProject(name: string, options?: { readonly archived?: boolean }): string;
+  /** Every project the daemon holds, added by the test or created by a client, oldest first. */
+  projects(): FakeProject[];
   /**
    * Adds a conversation to a project as it would exist from earlier use, with its title, its
    * transcript and its last turn ended, and returns its identifier.

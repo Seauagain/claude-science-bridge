@@ -9,6 +9,7 @@ import {
 import { findProjectLink } from "../../project-link/index.ts";
 import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
 import { rethrowAsRequestError } from "./errors.ts";
+import { createFolderProjects } from "./folder-project.ts";
 import { historyUpdates } from "./history.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
@@ -34,11 +35,12 @@ export interface ScienceAgentOptions {
 /**
  * Builds the ACP agent that fronts Claude Science. Connect it to a stream to serve one client.
  *
- * A session is opened in a working folder. Its first prompt starts a conversation in the
- * project that folder is linked to, and later prompts continue it. The conversations of a
- * folder's project can be listed as sessions, and loading one replays its history and continues
- * it. Sessions run their turns independently of each other; one session takes one prompt at a
- * time.
+ * A session is opened in a working folder, any folder. Its first prompt starts a conversation
+ * in the project that folder is linked to, and later prompts continue it. A folder that is not
+ * linked is linked by that first prompt, to the project that has the folder's name or to a new
+ * project of that name. The conversations of a linked folder's project can be listed as
+ * sessions, and loading one replays its history and continues it. Sessions run their turns
+ * independently of each other; one session takes one prompt at a time.
  */
 export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
   const sessions = new Map<string, Session>();
@@ -51,6 +53,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     });
     return connection;
   };
+  const projectOf = createFolderProjects(daemon);
 
   return agent({ name: "claude-science-bridge" })
     .onRequest(methods.agent.initialize, () => ({
@@ -124,7 +127,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     .onRequest(methods.agent.session.prompt, ({ params, client }) => {
       const session = sessions.get(params.sessionId);
       if (session === undefined) throw RequestError.sessionNotFound(params.sessionId);
-      return answerPrompt(session, params, { client, daemon, record });
+      return answerPrompt(session, params, { client, daemon, projectOf, record });
     })
     .onNotification(methods.agent.session.cancel, ({ params }) => {
       // Nothing happens when no prompt is being answered or this one is cancelled already.

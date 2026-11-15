@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -26,8 +26,11 @@ export interface Harness {
   readonly fake: FakeScienceDaemon;
   /** Creates a project on the fake daemon and a temporary folder linked to it. */
   linkedFolder(projectName: string): Promise<{ folder: string; projectId: string }>;
-  /** Creates a temporary folder that is not linked to any project. */
-  unlinkedFolder(): Promise<string>;
+  /**
+   * Creates a temporary folder that is not linked to any project. Its last path segment is
+   * `name`, or a random one when the name does not matter.
+   */
+  unlinkedFolder(name?: string): Promise<string>;
   /**
    * The folder the harness's adapters keep their own state in, unless a client is given another
    * one. It does not exist until an adapter creates it.
@@ -84,7 +87,12 @@ export async function startHarness(): Promise<Harness> {
       await writeProjectLink(folder, { projectId, name: projectName });
       return { folder, projectId };
     },
-    unlinkedFolder: newFolder,
+    async unlinkedFolder(name) {
+      if (name === undefined) return newFolder();
+      const folder = join(await newFolder(), name);
+      await mkdir(folder);
+      return folder;
+    },
     stateFolder,
     temporaryFolder: newFolder,
     async withClient(use, options = {}) {

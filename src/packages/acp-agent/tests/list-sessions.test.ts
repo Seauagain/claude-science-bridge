@@ -1,5 +1,6 @@
 import { methods } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { findProjectLink } from "../../project-link/index.ts";
 import { type Harness, runTurn, startHarness } from "./support/harness.ts";
 import { loadSession } from "./support/loaded-session.ts";
 
@@ -148,13 +149,15 @@ describe("listing the sessions of a folder", () => {
       title: "Fold of GFP",
       updatedAt: "2026-11-02T10:00:00Z",
     });
-    const folder = await harness.unlinkedFolder();
+    const folder = await harness.unlinkedFolder("Protein folding");
 
     const response = await harness.withClient((context) =>
       context.request(methods.agent.session.list, { cwd: folder }),
     );
 
     expect(response).toEqual({ sessions: [] });
+    // Listing is not the moment to link a folder, even one that has a project's name.
+    expect(await findProjectLink(folder)).toBeUndefined();
   });
 
   it("lists nothing when the client names no folder", async () => {
