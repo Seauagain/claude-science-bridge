@@ -1,12 +1,11 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeProjectLink } from "../../project-link/index.ts";
 import type { ScienceCli } from "../../science-daemon/index.ts";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../science-daemon/testing.ts";
-import { runCli } from "../index.ts";
+import { runDoctor as runDoctorIn } from "./support/run-doctor.ts";
 
 let fake: FakeScienceDaemon;
 /** A temporary folder linked to the project "Protein folding" on the fake daemon. */
@@ -29,26 +28,12 @@ afterEach(async () => {
   await rm(unlinkedFolder, { recursive: true, force: true });
 });
 
-/** Runs `csbridge doctor` in `cwd` and returns its exit code and the lines it printed. */
-async function runDoctor(setup: { cwd?: string; scienceCli?: ScienceCli } = {}) {
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const printed = { stdout: "", stderr: "" };
-  stdout.on("data", (chunk) => {
-    printed.stdout += String(chunk);
-  });
-  stderr.on("data", (chunk) => {
-    printed.stderr += String(chunk);
-  });
-  const exitCode = await runCli(["doctor"], {
-    stdin: new PassThrough(),
-    stdout,
-    stderr,
-    env: {},
+/** Runs `csbridge doctor` against the fake daemon, in the linked folder unless told otherwise. */
+function runDoctor(setup: { cwd?: string; scienceCli?: ScienceCli } = {}) {
+  return runDoctorIn({
     cwd: setup.cwd ?? linkedFolder,
     scienceCli: setup.scienceCli ?? fake.scienceCli,
   });
-  return { exitCode, lines: printed.stdout.trimEnd().split("\n"), stderr: printed.stderr };
 }
 
 describe("csbridge doctor", () => {

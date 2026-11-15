@@ -44,6 +44,29 @@ This project aims to close both gaps:
 - Credentials, tokens and keys are never read, logged or exported.
 - No Anthropic prompts, skills or other bundled assets are redistributed here.
 
+## Checking the setup
+
+`csbridge doctor` checks the whole setup in one go and prints one line per check: the Science
+CLI can be found, the daemon is running, its version is one this release was tested with, a login
+works, and whether the current folder is linked to a project. A failed check says what to do
+next and makes the exit code non-zero; a warning does not.
+
+```
+$ csbridge doctor
+ok    Science CLI: found
+FAIL  Daemon: Claude Science is not running. Start it with `claude-science serve` and try again.
+FAIL  Daemon version: not checked, because the "Daemon" check failed. Fix that first.
+FAIL  Login: not checked, because the "Daemon" check failed. Fix that first.
+warn  Project link: /work/folding is not linked to a project. Run "csbridge link --project <name>" in the folder you want to open sessions in.
+```
+
+`csbridge acp` reports the same problems to the ACP client when a session is opened. A daemon
+version that was not tested only produces a warning on standard error.
+
+The `claude-science` executable is looked for in this order: the `--claude-science-bin <path>`
+option, the `CLAUDE_SCIENCE_BIN` environment variable, `PATH`, and `bin/` in the default Claude
+Science data folder.
+
 ## Roadmap
 
 - [ ] Minimal adapter: new conversation, plain-text streaming replies
