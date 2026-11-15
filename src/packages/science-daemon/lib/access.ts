@@ -1,4 +1,4 @@
-import type { DaemonEndpoint } from "./endpoint.ts";
+import { type DaemonEndpoint, locateDaemon } from "./endpoint.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import { type Login, logIn, refreshCsrfToken } from "./login.ts";
 import type { ScienceCli } from "./science-cli.ts";
@@ -13,7 +13,7 @@ export const LOGIN_NOT_RENEWED = "The login to Claude Science expired and could 
  */
 export class DaemonAccess {
   readonly #scienceCli: ScienceCli;
-  readonly #endpoint: DaemonEndpoint;
+  #endpoint: DaemonEndpoint;
   #login: Login;
   #renewal: Promise<Login> | undefined;
 
@@ -29,6 +29,14 @@ export class DaemonAccess {
 
   get login(): Login {
     return this.#login;
+  }
+
+  /**
+   * Asks the Science CLI where the daemon is now: one that was restarted may listen on another
+   * port. Fails with `not-running` when there is none.
+   */
+  async relocate(): Promise<void> {
+    this.#endpoint = await locateDaemon(this.#scienceCli);
   }
 
   /**

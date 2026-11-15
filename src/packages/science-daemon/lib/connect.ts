@@ -5,7 +5,12 @@ import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
 import { listProjects, type Project } from "./projects.ts";
 import type { ScienceCli } from "./science-cli.ts";
-import { type DaemonEvent, openDaemonSocket } from "./socket.ts";
+import {
+  type ConnectionTiming,
+  type DaemonEvent,
+  DEFAULT_TIMING,
+  openDaemonSocket,
+} from "./socket.ts";
 import { untestedVersionWarning } from "./tested-versions.ts";
 import { type Turn, TurnTracker } from "./turn.ts";
 import { expectRecord, expectString } from "./validate.ts";
@@ -44,6 +49,8 @@ export interface ConnectOptions {
    * daemon version this release was not tested with. Without it such warnings are not reported.
    */
   readonly onWarning?: (message: string) => void;
+  /** Overrides for the connection's timing. Leave it out to get the production values. */
+  readonly timing?: Partial<ConnectionTiming>;
 }
 
 /** Events kept while a new conversation's identifier is not known yet. */
@@ -60,9 +67,13 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   const versionWarning = untestedVersionWarning(endpoint.version);
   if (versionWarning !== undefined) options.onWarning?.(versionWarning);
   const login = await logIn(endpoint, options.scienceCli);
-  const http = createDaemonHttp(new DaemonAccess(options.scienceCli, endpoint, login));
+  const access = new DaemonAccess(options.scienceCli, endpoint, login);
+  const http = createDaemonHttp(access);
   const me = expectRecord(await http.get("/me"), "GET /me");
-  const socket = await openDaemonSocket(endpoint, login, expectString(me, "user_id", "GET /me"));
+  const socket = await openDaemonSocket(access, expectString(me, "user_id", "GET /me"), {
+    ...DEFAULT_TIMING,
+    ...options.timing,
+  });
 
   return {
     listProjects: () => listProjects(http),

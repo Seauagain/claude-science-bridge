@@ -58,6 +58,23 @@ export interface FakeScienceDaemon {
   broadcast(event: JsonRecord): void;
   /** How many event sockets are open right now. */
   eventConnectionCount(): number;
+  /** Cuts every open event socket without a closing handshake. The daemon itself stays up. */
+  dropEventSockets(): void;
+  /** Resolves the next time a client opens an event socket. */
+  nextEventSocket(): Promise<void>;
+  /** Resolves the next time a ping arrives on an event socket. */
+  nextPing(): Promise<void>;
+  /** Makes the daemon answer pings with a pong (the default) or leave them unanswered. */
+  answerPings(answer: boolean): void;
+  /**
+   * Stops the daemon as when its process exits: event sockets drop, requests find nobody
+   * listening, the Science CLI stand-in reports it as not running, and logins are forgotten.
+   * Projects and conversations are kept.
+   */
+  stop(): Promise<void>;
+  /** Starts a stopped daemon again. It listens on a new port. */
+  start(): Promise<void>;
+  /** Stops the daemon for good. */
   close(): Promise<void>;
 }
 
@@ -73,7 +90,7 @@ const TIMESTAMP = "2026-11-15T08:00:00Z";
 
 export async function startFakeScienceDaemon(): Promise<FakeScienceDaemon> {
   const daemon = new FakeDaemon();
-  await daemon.listen();
+  await daemon.start();
   return daemon;
 }
 
@@ -98,7 +115,7 @@ class FakeDaemon implements FakeScienceDaemon {
     this.#server.on("upgrade", (request, socket, head) => this.#upgrade(request, socket, head));
   }
 
-  async listen(): Promise<void> {
+  async start(): Promise<void> {
     await new Promise<void>((resolve) => this.#server.listen(0, "127.0.0.1", resolve));
     this.#port = (this.#server.address() as AddressInfo).port;
   }
@@ -106,7 +123,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly scienceCli: ScienceCli = async (args) => {
     if (args[0] === "status") {
       // What the real program prints besides `running` when no daemon is up is not known.
-      if (!this.#running) return JSON.stringify({ running: false });
+      if (!this.#running || !this.#server.listening) return JSON.stringify({ running: false });
       return JSON.stringify({ running: true, version: this.#version, port: this.#port });
     }
     if (args[0] === "url") {
@@ -169,10 +186,33 @@ class FakeDaemon implements FakeScienceDaemon {
     return this.#sockets.count;
   }
 
-  async close(): Promise<void> {
-    this.#sockets.close();
+  dropEventSockets(): void {
+    this.#sockets.drop();
+  }
+
+  nextEventSocket(): Promise<void> {
+    return this.#sockets.nextOpened();
+  }
+
+  nextPing(): Promise<void> {
+    return this.#sockets.nextPing();
+  }
+
+  answerPings(answer: boolean): void {
+    this.#sockets.answerPings(answer);
+  }
+
+  async stop(): Promise<void> {
+    this.#sockets.drop();
+    this.#logins.expire();
+    if (!this.#server.listening) return;
     this.#server.closeAllConnections();
     await new Promise<void>((resolve) => this.#server.close(() => resolve()));
+  }
+
+  async close(): Promise<void> {
+    await this.stop();
+    this.#sockets.close();
   }
 
   get #origin(): string {

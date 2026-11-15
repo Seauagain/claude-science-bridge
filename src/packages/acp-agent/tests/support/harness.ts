@@ -10,7 +10,12 @@ import {
   type StopReason,
 } from "@agentclientprotocol/sdk";
 import { writeProjectLink } from "../../../project-link/index.ts";
-import { connectScienceDaemon, type ScienceCli } from "../../../science-daemon/index.ts";
+import {
+  type ConnectionTiming,
+  connectScienceDaemon,
+  type ScienceCli,
+  type ScienceDaemon,
+} from "../../../science-daemon/index.ts";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../../science-daemon/testing.ts";
 import { createScienceAgent } from "../../index.ts";
 
@@ -23,11 +28,12 @@ export interface Harness {
   unlinkedFolder(): Promise<string>;
   /**
    * Runs `use` as an ACP client connected to the agent, already initialized. The agent uses the
-   * fake daemon's Science CLI stand-in unless `options.scienceCli` replaces it.
+   * fake daemon's Science CLI stand-in unless `options.scienceCli` replaces it, and the
+   * connection's production timing unless `options.timing` shortens it.
    */
   withClient<T>(
     use: (context: ClientContext) => Promise<T>,
-    options?: { scienceCli?: ScienceCli },
+    options?: { scienceCli?: ScienceCli; timing?: Partial<ConnectionTiming> },
   ): Promise<T>;
   dispose(): Promise<void>;
 }
@@ -52,17 +58,29 @@ export async function startHarness(): Promise<Harness> {
     unlinkedFolder: newFolder,
     async withClient(use, options = {}) {
       const scienceCli = options.scienceCli ?? fake.scienceCli;
+      const connections: Promise<ScienceDaemon>[] = [];
       const agent = createScienceAgent({
-        connectDaemon: () => connectScienceDaemon({ scienceCli }),
+        connectDaemon: () => {
+          const connection = connectScienceDaemon({ scienceCli, timing: options.timing ?? {} });
+          connections.push(connection);
+          return connection;
+        },
         version: "0.0.0-test",
       });
-      return client({ name: "test-client" }).connectWith(agent, async (context) => {
-        await context.request(methods.agent.initialize, {
-          protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: {},
+      try {
+        return await client({ name: "test-client" }).connectWith(agent, async (context) => {
+          await context.request(methods.agent.initialize, {
+            protocolVersion: PROTOCOL_VERSION,
+            clientCapabilities: {},
+          });
+          return use(context);
         });
-        return use(context);
-      });
+      } finally {
+        // A connection left open would go on trying to reach the fake daemon after the test.
+        for (const connection of await Promise.allSettled(connections)) {
+          if (connection.status === "fulfilled") connection.value.close();
+        }
+      }
     },
     async dispose() {
       await fake.close();

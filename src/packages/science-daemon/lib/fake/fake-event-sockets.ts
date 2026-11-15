@@ -9,6 +9,10 @@ export class FakeEventSockets {
     noServer: true,
     handleProtocols: (offered) => [...offered][0] ?? false,
   });
+  #answeringPings = true;
+  /** Callers of {@link nextOpened} and {@link nextPing} that are still waiting. */
+  #awaitingSocket: (() => void)[] = [];
+  #awaitingPing: (() => void)[] = [];
 
   /** Completes a handshake the daemon accepts and starts serving the socket. */
   accept(request: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -31,6 +35,21 @@ export class FakeEventSockets {
     for (const socket of this.#server.clients) socket.terminate();
   }
 
+  /** While false, pings get no pong. */
+  answerPings(answer: boolean): void {
+    this.#answeringPings = answer;
+  }
+
+  /** Resolves the next time a client opens a socket. */
+  nextOpened(): Promise<void> {
+    return new Promise((resolve) => this.#awaitingSocket.push(resolve));
+  }
+
+  /** Resolves the next time a ping arrives. */
+  nextPing(): Promise<void> {
+    return new Promise((resolve) => this.#awaitingPing.push(resolve));
+  }
+
   close(): void {
     this.drop();
     this.#server.close();
@@ -39,9 +58,12 @@ export class FakeEventSockets {
   #serve(client: WebSocket): void {
     client.on("message", (data) => {
       const message: unknown = JSON.parse(String(data));
-      if (isRecord(message) && message.type === "ping") client.send('{"type":"pong"}');
+      if (!isRecord(message) || message.type !== "ping") return;
+      if (this.#answeringPings) client.send('{"type":"pong"}');
+      for (const resolve of this.#awaitingPing.splice(0)) resolve();
     });
     // The real daemon pushes events nobody asked for; clients must ignore them.
     client.send(JSON.stringify({ type: "environment_status", environments: [] }));
+    for (const resolve of this.#awaitingSocket.splice(0)) resolve();
   }
 }
