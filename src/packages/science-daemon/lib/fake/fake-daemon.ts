@@ -42,8 +42,8 @@ export interface FakeConversation {
 export interface FakeScienceDaemon {
   /** A Science CLI stand-in that answers `status` and `url` for this fake daemon. */
   readonly scienceCli: ScienceCli;
-  /** Creates a project and returns its identifier. */
-  addProject(name: string): string;
+  /** Creates a project, archived if asked, and returns its identifier. */
+  addProject(name: string, options?: { readonly archived?: boolean }): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
   onNextMessage(script: ReplyScript): void;
   /** Every conversation started so far, oldest first. */
@@ -56,6 +56,12 @@ export interface FakeScienceDaemon {
   /** Pushes an event to every open socket, as the daemon does for the user's other activity. */
   broadcast(event: JsonRecord): void;
   close(): Promise<void>;
+}
+
+interface Project {
+  readonly name: string;
+  /** When the project was archived, or null for a project in use. */
+  readonly archivedAt: string | null;
 }
 
 interface Conversation {
@@ -72,6 +78,7 @@ interface Conversation {
 
 const VERSION = "0.1.53";
 const AGENT_NAME = "OPERON";
+const TIMESTAMP = "2026-11-15T08:00:00Z";
 const defaultReply: ReplyScript = (turn) => {
   turn.replyText("pong");
   turn.complete();
@@ -91,7 +98,7 @@ class FakeDaemon implements FakeScienceDaemon {
   });
   readonly #nonces = new Set<string>();
   readonly #logins = new Set<string>();
-  readonly #projects = new Map<string, string>();
+  readonly #projects = new Map<string, Project>();
   readonly #conversations: Conversation[] = [];
   readonly #scripts: ReplyScript[] = [];
   readonly #intentIds = new Set<string>();
@@ -124,9 +131,9 @@ class FakeDaemon implements FakeScienceDaemon {
     throw new Error(`fake Science CLI: unsupported arguments ${args.join(" ")}`);
   };
 
-  addProject(name: string): string {
+  addProject(name: string, options: { readonly archived?: boolean } = {}): string {
     const projectId = `proj_${randomBytes(6).toString("hex")}`;
-    this.#projects.set(projectId, name);
+    this.#projects.set(projectId, { name, archivedAt: options.archived ? TIMESTAMP : null });
     return projectId;
   }
 
@@ -190,6 +197,7 @@ class FakeDaemon implements FakeScienceDaemon {
     }
 
     if (route === "GET /api/me") return sendJson(response, 200, { user_id: "fake-user" });
+    if (route === "GET /api/projects") return this.#listProjects(response);
     const startMatch = /^\/api\/projects\/([^/]+)\/request$/.exec(url.pathname);
     if (request.method === "POST" && startMatch) {
       return this.#startConversation(decodeURIComponent(startMatch[1] ?? ""), request, response);
@@ -262,6 +270,18 @@ class FakeDaemon implements FakeScienceDaemon {
       root_frame_id: conversation.id,
       cancelled_frames: running ? [conversation.id] : [],
     });
+  }
+
+  #listProjects(response: ServerResponse): void {
+    const projects = [...this.#projects].map(([projectId, project]) => ({
+      project_id: projectId,
+      name: project.name,
+      description: "",
+      conversation_count: this.#conversations.filter((each) => each.projectId === projectId).length,
+      archived_at: project.archivedAt,
+      updated_at: TIMESTAMP,
+    }));
+    sendJson(response, 200, { projects, total: projects.length });
   }
 
   async #startConversation(

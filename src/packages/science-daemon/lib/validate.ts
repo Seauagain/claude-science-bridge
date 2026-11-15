@@ -27,6 +27,13 @@ export function expectNumber(record: JsonRecord, field: string, call: string): n
   throw unexpected(call, `expected a number in "${field}"`);
 }
 
+/** Returns the array field `field` of `record`, or fails naming the `call` that produced it. */
+export function expectArray(record: JsonRecord, field: string, call: string): unknown[] {
+  const value = record[field];
+  if (Array.isArray(value)) return value;
+  throw unexpected(call, `expected an array in "${field}"`);
+}
+
 function unexpected(call: string, problem: string): ScienceDaemonError {
   return new ScienceDaemonError(
     "unexpected-response",

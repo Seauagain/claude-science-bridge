@@ -147,3 +147,8 @@ Rules that follow from what was observed:
    conversation with no running turn or for an unknown id. The adapter only cancels a turn it is
    following; the fake answers an empty `cancelled_frames` and 404 respectively and changes
    nothing. **[open]**
+5. The type of a project's `archived_at`, and whether `GET /projects` returns every project in one
+   response (`total` hints at paging). Until this is observed, the code treats a project as
+   archived when `archived_at` is anything but null or absent, and reads only the one response;
+   the fake daemon sends null for a project in use and a timestamp string for an archived one.
+   **[open]**
