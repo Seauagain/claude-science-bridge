@@ -101,7 +101,9 @@ describe("prompting after the login has expired", () => {
     let loginLinksAvailable = true;
     const scienceCli = (args: readonly string[]) =>
       args[0] === "url" && !loginLinksAvailable
-        ? Promise.reject(new Error("spawn claude-science ENOENT"))
+        ? Promise.reject(
+            Object.assign(new Error("spawn claude-science ENOENT"), { code: "ENOENT" }),
+          )
         : harness.fake.scienceCli(args);
 
     const failure = harness.withClient(

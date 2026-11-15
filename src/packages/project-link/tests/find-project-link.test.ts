@@ -15,8 +15,8 @@ afterEach(async () => {
 });
 
 async function writeMarker(folder: string, contents: string): Promise<void> {
-  await mkdir(join(folder, ".claude-science"), { recursive: true });
-  await writeFile(join(folder, ".claude-science", "project.json"), contents, "utf8");
+  await mkdir(join(folder, ".csbridge"), { recursive: true });
+  await writeFile(join(folder, ".csbridge", "project.json"), contents, "utf8");
 }
 
 const marker = (projectId: string, name: string) =>

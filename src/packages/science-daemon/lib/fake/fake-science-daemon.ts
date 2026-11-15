@@ -38,6 +38,13 @@ export interface FakeScienceDaemon {
   addProject(name: string, options?: { readonly archived?: boolean }): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
   onNextMessage(script: ReplyScript): void;
+  /**
+   * Makes a cancel end the running turn with status `cancelled` (the default) or, while false,
+   * only be acknowledged: the daemon answers the cancel as usual and the reply script's
+   * `cancelled` resolves, but the turn runs on until the script ends it, if it ever does. This
+   * stands for a daemon that is slow to stop a reply or fails to; nothing like it was observed.
+   */
+  endTurnsOnCancel(end: boolean): void;
   /** Every conversation started so far, oldest first. */
   conversations(): FakeConversation[];
   /**
@@ -60,6 +67,15 @@ export interface FakeScienceDaemon {
   nextPing(): Promise<void>;
   /** Makes the daemon answer pings with a pong (the default) or leave them unanswered. */
   answerPings(answer: boolean): void;
+
+  /**
+   * Makes the daemon answer requests and socket handshakes (the default) or, while false, accept
+   * their connections and then say nothing, as a daemon that hangs does. What arrives meanwhile
+   * is never answered, also not once the daemon answers again. Event sockets that are open
+   * already are not affected: see {@link answerPings} and {@link dropEventSockets}. The Science
+   * CLI stand-in goes on reporting the daemon as running.
+   */
+  answerRequests(answer: boolean): void;
 
   /**
    * Stops the daemon as when its process exits: event sockets drop, requests find nobody

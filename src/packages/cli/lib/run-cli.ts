@@ -18,6 +18,9 @@ export interface CliIo {
   readonly scienceCli?: ScienceCli;
 }
 
+/** The surroundings of one command: those of the process, with the Science CLI to use settled. */
+export type CommandIo = CliIo & { readonly scienceCli: ScienceCli };
+
 const SCIENCE_CLI_OPTION = "--claude-science-bin";
 
 const USAGE = `Usage: csbridge <command>

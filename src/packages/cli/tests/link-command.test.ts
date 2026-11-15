@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -130,6 +130,20 @@ describe("csbridge link", () => {
     expect(result.stdout).toBe(`Linked ${analysis} to "Protein folding" (${projectId}).\n`);
   });
 
+  it("writes nothing into a Claude Science data folder that the linked folder holds", async () => {
+    // The home folder holds the daemon's data folder, and csbridge must never write into that.
+    const projectId = fake.addProject("Protein folding");
+    const dataFolder = join(folder, ".claude-science");
+    await mkdir(dataFolder);
+    await writeFile(join(dataFolder, "daemon-data"), "not ours", "utf8");
+
+    const result = await link(["--project", projectId]);
+
+    expect(result.exitCode).toBe(0);
+    expect(await readdir(dataFolder)).toEqual(["daemon-data"]);
+    expect(await readdir(join(folder, ".csbridge"))).toEqual(["project.json"]);
+  });
+
   it("fails when the folder does not exist, without creating it", async () => {
     const projectId = fake.addProject("Protein folding");
     const missing = join(folder, "no-such-folder");
@@ -222,8 +236,8 @@ describe("csbridge link in a folder that is already linked", () => {
 
   it("replaces a link that cannot be read, passing on what is wrong with it", async () => {
     const projectId = fake.addProject("Protein folding");
-    const marker = join(folder, ".claude-science", "project.json");
-    await mkdir(join(folder, ".claude-science"));
+    const marker = join(folder, ".csbridge", "project.json");
+    await mkdir(join(folder, ".csbridge"));
     await writeFile(marker, "{ not json", "utf8");
 
     const result = await link(["--project", projectId]);

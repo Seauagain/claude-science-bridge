@@ -2,19 +2,15 @@ import { readFile } from "node:fs/promises";
 import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { createScienceAgent } from "../../acp-agent/index.ts";
-import {
-  connectScienceDaemon,
-  type ScienceCli,
-  type ScienceDaemon,
-} from "../../science-daemon/index.ts";
+import { connectScienceDaemon, type ScienceDaemon } from "../../science-daemon/index.ts";
 import { daemonSetup } from "./daemon-setup.ts";
-import type { CliIo } from "./run-cli.ts";
+import type { CommandIo } from "./run-cli.ts";
 
 /**
  * `csbridge acp`: serves one ACP client on standard input and output until it disconnects.
  * Standard output carries protocol messages only.
  */
-export async function runAcpCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
+export async function runAcpCommand(io: CommandIo): Promise<number> {
   const connections: Promise<ScienceDaemon>[] = [];
   const agent = createScienceAgent({
     connectDaemon: () => {

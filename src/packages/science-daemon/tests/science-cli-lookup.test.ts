@@ -50,6 +50,7 @@ const inDefaultDataFolder = () =>
 function scienceCliWith(options: {
   executable?: string;
   env?: Record<string, string>;
+  timeoutMs?: number;
 }): ScienceCli {
   return createScienceCli({ env: {}, ...options, homeFolder: places.homeFolder });
 }
@@ -148,10 +149,15 @@ describe("finding the Science CLI", () => {
   });
 });
 
-describe("running a Science CLI that fails", () => {
-  it("reports which call could not be run", async () => {
+describe("running a Science CLI that was found but does not do its job", () => {
+  /** Installs `script` as the program the command-line option names. */
+  async function installScript(script: string): Promise<void> {
     await mkdir(dirname(places.option), { recursive: true });
-    await writeFile(places.option, "#!/bin/sh\nexit 3\n", { encoding: "utf8", mode: 0o755 });
+    await writeFile(places.option, `#!/bin/sh\n${script}\n`, { encoding: "utf8", mode: 0o755 });
+  }
+
+  it("says that the call failed and to run it in a terminal, not that the program is missing", async () => {
+    await installScript("exit 3");
 
     const connecting = connectScienceDaemon({
       scienceCli: scienceCliWith({ executable: places.option }),
@@ -159,7 +165,24 @@ describe("running a Science CLI that fails", () => {
 
     await expect(connecting).rejects.toMatchObject({
       kind: "science-cli-failed",
-      message: expect.stringContaining('Could not run "claude-science status"'),
+      message:
+        '"claude-science status" failed with exit code 3. ' +
+        "Run it in a terminal to see what is wrong.",
+    });
+  });
+
+  it("says that the call ran out of time and to run it in a terminal, not that the program is missing", async () => {
+    await installScript("exec sleep 5");
+
+    const connecting = connectScienceDaemon({
+      scienceCli: scienceCliWith({ executable: places.option, timeoutMs: 50 }),
+    });
+
+    await expect(connecting).rejects.toMatchObject({
+      kind: "science-cli-failed",
+      message:
+        '"claude-science status" did not finish in time and was stopped. ' +
+        "Run it in a terminal to see what holds it up.",
     });
   });
 });

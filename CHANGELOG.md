@@ -21,4 +21,11 @@ All notable changes to this project are recorded here. The format follows
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;
   `CSBRIDGE_START_COMMAND` to name the command that starts Claude Science on this machine.
 
+- Every request to the daemon has a time limit (30 s), so a daemon that accepts connections but
+  does not answer cannot hang a prompt.
+- A cancelled prompt always answers `cancelled`: also when the turn fails or the cancel cannot be
+  delivered, when the message had not been sent yet (it is then not sent), and when the daemon
+  does not end the turn within 10 s.
+- The project link is the marker file `.csbridge/project.json` in the linked folder.
+
 Tested against Claude Science 0.1.53.

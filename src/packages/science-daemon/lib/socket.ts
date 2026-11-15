@@ -3,6 +3,7 @@ import { type DaemonAccess, newLoginRejected } from "./access.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import { type Heartbeat, keepAlive } from "./heartbeat.ts";
 import type { Login } from "./login.ts";
+import { noAnswerMessage } from "./time-limit.ts";
 import { type ConnectionTiming, MAX_RECONNECT_DELAY_MS } from "./timing.ts";
 import { isRecord, type JsonRecord } from "./validate.ts";
 
@@ -121,14 +122,26 @@ class EventSocket implements DaemonSocket {
             `Could not open the event connection to Claude Science (${reason}).`,
           ),
         );
+      // A daemon that takes the connection and then says nothing would keep the handshake, and
+      // everyone waiting for the socket, waiting for ever.
+      const { requestTimeoutMs } = this.#timing;
+      const deadline = setTimeout(() => {
+        reject(new ScienceDaemonError("unreachable", noAnswerMessage(requestTimeoutMs)));
+        socket.terminate();
+      }, requestTimeoutMs);
       socket.once("unexpected-response", (_request, response) => {
+        clearTimeout(deadline);
         if (response.statusCode === 401) resolve("login-rejected");
         else refuse(`HTTP ${response.statusCode}`);
         socket.terminate();
       });
       // After the handshake, errors surface as a close. Keep the process alive through them.
-      socket.on("error", (error) => refuse(error.message));
+      socket.on("error", (error) => {
+        clearTimeout(deadline);
+        refuse(error.message);
+      });
       socket.once("open", () => {
+        clearTimeout(deadline);
         if (this.#closed) {
           // Closed while the handshake was under way: nobody wants this socket any more.
           socket.terminate();
