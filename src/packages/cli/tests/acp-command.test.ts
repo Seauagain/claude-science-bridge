@@ -68,35 +68,50 @@ describe("csbridge acp", () => {
   });
 });
 
+/** Opens a session in a folder linked to a project, as an ACP client would, then disconnects. */
+async function openSessionThenDisconnect() {
+  const folder = await mkdtemp(join(tmpdir(), "csbridge-acp-"));
+  try {
+    await writeProjectLink(folder, {
+      projectId: fake.addProject("Protein folding"),
+      name: "Protein folding",
+    });
+    const cli = startCli(["acp"]);
+    const request = (id: number, method: string, params: unknown) =>
+      cli.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+
+    request(1, "initialize", { protocolVersion: 1 });
+    request(2, "session/new", { cwd: folder, mcpServers: [] });
+    await waitFor(() => cli.output.stdout.split("\n").length > 2);
+    cli.stdin.end();
+    return { exitCode: await cli.exitCode, output: cli.output };
+  } finally {
+    await rm(folder, { recursive: true, force: true });
+  }
+}
+
 describe("csbridge acp with a daemon version it was not tested with", () => {
   it("warns on standard error and keeps serving the client", async () => {
     fake.reportVersion("9.9.9");
-    const folder = await mkdtemp(join(tmpdir(), "csbridge-acp-"));
-    try {
-      await writeProjectLink(folder, {
-        projectId: fake.addProject("Protein folding"),
-        name: "Protein folding",
-      });
-      const cli = startCli(["acp"]);
-      const request = (id: number, method: string, params: unknown) =>
-        cli.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 
-      request(1, "initialize", { protocolVersion: 1 });
-      request(2, "session/new", { cwd: folder, mcpServers: [] });
-      await waitFor(() => cli.output.stdout.split("\n").length > 2);
-      cli.stdin.end();
+    const { exitCode, output } = await openSessionThenDisconnect();
 
-      expect(await cli.exitCode).toBe(0);
-      expect(cli.output.stderr).toMatch(/warning: .*9\.9\.9 has not been tested.*0\.1\.53/);
-      // Standard output still carries protocol messages only, and the session was opened.
-      const messages = cli.output.stdout.trimEnd().split("\n");
-      expect(messages.map((line) => JSON.parse(line))).toEqual([
-        expect.objectContaining({ id: 1, result: expect.anything() }),
-        expect.objectContaining({ id: 2, result: { sessionId: expect.any(String) } }),
-      ]);
-    } finally {
-      await rm(folder, { recursive: true, force: true });
-    }
+    expect(exitCode).toBe(0);
+    expect(output.stderr).toMatch(/warning: .*9\.9\.9 has not been tested.*0\.1\.53/);
+    // Standard output still carries protocol messages only, and the session was opened.
+    const messages = output.stdout.trimEnd().split("\n");
+    expect(messages.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({ id: 1, result: expect.anything() }),
+      expect.objectContaining({ id: 2, result: { sessionId: expect.any(String) } }),
+    ]);
+  });
+});
+
+describe("csbridge acp after the client has disconnected", () => {
+  it("leaves no connection to the daemon open, so the process can exit", async () => {
+    await openSessionThenDisconnect();
+
+    await waitFor(() => fake.eventConnectionCount() === 0);
   });
 });
 

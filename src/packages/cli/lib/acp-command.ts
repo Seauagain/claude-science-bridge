@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { createScienceAgent } from "../../acp-agent/index.ts";
-import { connectScienceDaemon, type ScienceCli } from "../../science-daemon/index.ts";
+import {
+  connectScienceDaemon,
+  type ScienceCli,
+  type ScienceDaemon,
+} from "../../science-daemon/index.ts";
 import type { CliIo } from "./run-cli.ts";
 
 /**
@@ -10,16 +14,26 @@ import type { CliIo } from "./run-cli.ts";
  * Standard output carries protocol messages only.
  */
 export async function runAcpCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
+  const connections: Promise<ScienceDaemon>[] = [];
   const agent = createScienceAgent({
-    connectDaemon: () =>
-      connectScienceDaemon({
+    connectDaemon: () => {
+      const connection = connectScienceDaemon({
         scienceCli: io.scienceCli,
         onWarning: (message) => io.stderr.write(`csbridge: warning: ${message}\n`),
-      }),
+      });
+      connections.push(connection);
+      return connection;
+    },
     version: await readVersion(),
   });
   const stream = ndJsonStream(Writable.toWeb(io.stdout), Readable.toWeb(io.stdin));
   await agent.connect(stream).closed;
+
+  // An open connection to the daemon would keep the process alive after the client has gone.
+  // Attempts that failed were reported to the client when they happened and left nothing open.
+  for (const connection of await Promise.allSettled(connections)) {
+    if (connection.status === "fulfilled") connection.value.close();
+  }
   return 0;
 }
 

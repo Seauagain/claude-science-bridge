@@ -53,6 +53,8 @@ export interface FakeScienceDaemon {
   conversations(): FakeConversation[];
   /** Pushes an event to every open socket, as the daemon does for the user's other activity. */
   broadcast(event: JsonRecord): void;
+  /** How many event sockets are open right now. */
+  eventConnectionCount(): number;
   close(): Promise<void>;
 }
 
@@ -154,6 +156,10 @@ class FakeDaemon implements FakeScienceDaemon {
   broadcast(event: JsonRecord): void {
     const text = JSON.stringify(event);
     for (const socket of this.#sockets.clients) socket.send(text);
+  }
+
+  eventConnectionCount(): number {
+    return this.#sockets.clients.size;
   }
 
   async close(): Promise<void> {
