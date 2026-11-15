@@ -5,6 +5,7 @@ import { logIn } from "./login.ts";
 import { listProjects, type Project } from "./projects.ts";
 import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonEvent, openDaemonSocket } from "./socket.ts";
+import { untestedVersionWarning } from "./tested-versions.ts";
 import { type Turn, TurnTracker } from "./turn.ts";
 import { expectRecord, expectString } from "./validate.ts";
 
@@ -37,6 +38,11 @@ export interface ScienceDaemon {
 export interface ConnectOptions {
   /** Runs the Science CLI. See {@link ScienceCli}. */
   readonly scienceCli: ScienceCli;
+  /**
+   * Receives a one-line warning about something that does not stop the connection: today, a
+   * daemon version this release was not tested with. Without it such warnings are not reported.
+   */
+  readonly onWarning?: (message: string) => void;
 }
 
 /** Events kept while a new conversation's identifier is not known yet. */
@@ -50,6 +56,8 @@ const MAX_BUFFERED_EVENTS = 1000;
  */
 export async function connectScienceDaemon(options: ConnectOptions): Promise<ScienceDaemon> {
   const endpoint = await locateDaemon(options.scienceCli);
+  const versionWarning = untestedVersionWarning(endpoint.version);
+  if (versionWarning !== undefined) options.onWarning?.(versionWarning);
   const login = await logIn(endpoint, options.scienceCli);
   const http = createDaemonHttp(endpoint, login);
   const me = expectRecord(await http.get("/me"), "GET /me");

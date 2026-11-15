@@ -16,13 +16,24 @@ export interface DaemonEndpoint {
 
 /** Asks the Science CLI where the daemon is. Fails with `not-running` when there is none. */
 export async function locateDaemon(scienceCli: ScienceCli): Promise<DaemonEndpoint> {
+  return parseDaemonStatus(await runScienceCli(scienceCli, ["status"]));
+}
+
+/**
+ * Reads what `claude-science status` printed. Fails with `not-running` when it reports no
+ * daemon. See "Discovery" in docs/protocol.md.
+ */
+export function parseDaemonStatus(output: string): DaemonEndpoint {
   const call = "claude-science status";
-  const output = await runScienceCli(scienceCli, ["status"]);
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch (cause) {
-    throw new ScienceDaemonError("science-cli-failed", `"${call}" did not print JSON.`, { cause });
+    throw new ScienceDaemonError(
+      "science-cli-failed",
+      `"${call}" did not print JSON. Run it in a terminal to see what it prints instead.`,
+      { cause },
+    );
   }
 
   const status = expectRecord(parsed, call);

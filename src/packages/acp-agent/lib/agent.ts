@@ -13,7 +13,7 @@ import { promptText } from "./prompt-text.ts";
 /** What {@link createScienceAgent} needs. */
 export interface ScienceAgentOptions {
   /**
-   * Connects to the daemon. Called when the first session needs it, and again after a failed
+   * Connects to the daemon. Called when the first session is opened, and again after a failed
    * attempt, so the agent starts even when the daemon is not running yet.
    */
   readonly connectDaemon: () => Promise<ScienceDaemon>;
@@ -83,6 +83,9 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
             'Run "csbridge link --project <name>" in that folder, then start a new session.',
         );
       }
+      // Connect now, so that a setup problem is reported when the session is opened rather than
+      // after the user has typed a prompt.
+      await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
       sessions.set(sessionId, { projectId: link.projectId });
       return { sessionId };
