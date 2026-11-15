@@ -1,5 +1,6 @@
 import type { DaemonHttp } from "./http.ts";
-import { expectArray, expectNumber, expectRecord, expectString, isRecord } from "./validate.ts";
+import { readMessages } from "./transcript.ts";
+import { expectArray, expectRecord, expectString, isRecord } from "./validate.ts";
 
 /** Where a conversation stands, read over HTTP when events about it may have been missed. */
 export interface ConversationState {
@@ -14,7 +15,6 @@ export interface ConversationState {
   readonly replyText: string;
 }
 
-const PAGE_SIZE = 100;
 const MESSAGES_CALL = "GET /frames/<id>/messages";
 
 /**
@@ -26,33 +26,18 @@ export async function readConversationState(
   conversationId: string,
 ): Promise<ConversationState> {
   const frameCall = "GET /frames/<id>";
-  const path = `/frames/${encodeURIComponent(conversationId)}`;
   // The status first. The other way round, a turn that ends between the two reads would be
   // reported as ended with a transcript that does not hold its reply yet.
-  const frame = expectRecord(await http.get(`${path}?shallow=true`), frameCall);
+  const frame = expectRecord(
+    await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
+    frameCall,
+  );
   const status = expectString(frame, "status", frameCall);
   const description = frame.status_description;
-  const replyText = closingReplyText(await readLastPage(http, path));
+  const replyText = closingReplyText(await readMessages(http, conversationId));
   return typeof description === "string" && description !== ""
     ? { status, statusDescription: description, replyText }
     : { status, replyText };
-}
-
-/** The transcript's last page of messages. Walks there page by page: only the end matters. */
-async function readLastPage(http: DaemonHttp, path: string): Promise<unknown[]> {
-  let from = 0;
-  for (;;) {
-    const page = expectRecord(
-      await http.get(`${path}/messages?from=${from}&limit=${PAGE_SIZE}`),
-      MESSAGES_CALL,
-    );
-    const messages = expectArray(page, "messages", MESSAGES_CALL);
-    const next = from + messages.length;
-    if (messages.length === 0 || next >= expectNumber(page, "total", MESSAGES_CALL)) {
-      return messages;
-    }
-    from = next;
-  }
 }
 
 /** The text of the last message, if the assistant wrote it. */

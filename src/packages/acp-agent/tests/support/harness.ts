@@ -7,6 +7,8 @@ import {
   client,
   methods,
   PROTOCOL_VERSION,
+  type SessionNotification,
+  type SessionUpdate,
   type StopReason,
 } from "@agentclientprotocol/sdk";
 import { writeProjectLink } from "../../../project-link/index.ts";
@@ -35,6 +37,11 @@ export interface Harness {
     use: (context: ClientContext) => Promise<T>,
     options?: { scienceCli?: ScienceCli; timing?: Partial<ConnectionTiming> },
   ): Promise<T>;
+  /**
+   * The updates the harness's clients have been sent for a session so far, oldest first. This
+   * is how a test sees the updates of a session it loaded instead of opening it.
+   */
+  updates(sessionId: string): SessionUpdate[];
   dispose(): Promise<void>;
 }
 
@@ -46,6 +53,13 @@ export async function startHarness(): Promise<Harness> {
     folders.push(folder);
     return folder;
   };
+  const received: SessionNotification[] = [];
+  const testClient = client({ name: "test-client" }).onNotification(
+    methods.client.session.update,
+    ({ params }) => {
+      received.push(params);
+    },
+  );
 
   return {
     fake,
@@ -68,7 +82,7 @@ export async function startHarness(): Promise<Harness> {
         version: "0.0.0-test",
       });
       try {
-        return await client({ name: "test-client" }).connectWith(agent, async (context) => {
+        return await testClient.connectWith(agent, async (context) => {
           await context.request(methods.agent.initialize, {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: {},
@@ -82,6 +96,8 @@ export async function startHarness(): Promise<Harness> {
         }
       }
     },
+    updates: (sessionId) =>
+      received.filter((each) => each.sessionId === sessionId).map((each) => each.update),
     async dispose() {
       await fake.close();
       await Promise.all(folders.map((folder) => rm(folder, { recursive: true, force: true })));
@@ -90,7 +106,10 @@ export async function startHarness(): Promise<Harness> {
 }
 
 /** Cancels the session's running turn, as a client does when the user stops a reply. */
-export function cancelTurn(context: ClientContext, session: ActiveSession): Promise<void> {
+export function cancelTurn(
+  context: ClientContext,
+  session: { readonly sessionId: string },
+): Promise<void> {
   return context.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
 }
 

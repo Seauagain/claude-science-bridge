@@ -11,6 +11,7 @@ import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonSocket, openDaemonSocket, type SocketSignal } from "./socket.ts";
 import { untestedVersionWarning } from "./tested-versions.ts";
 import { type ConnectionTiming, DEFAULT_TIMING } from "./timing.ts";
+import { readTranscript, type TranscriptEntry } from "./transcript.ts";
 import { type Turn, TurnTracker } from "./turn.ts";
 import { expectRecord, expectString } from "./validate.ts";
 
@@ -37,6 +38,15 @@ export interface ScienceDaemon {
    *   may for a project it does not know) or answers unexpectedly.
    */
   listConversations(projectId: string): Promise<Conversation[]>;
+  /**
+   * Reads what a conversation's transcript shows the user, oldest first: what the user typed,
+   * what Claude Science replied, and the tools it used. Messages the daemon added itself,
+   * reasoning, tool results and images are left out.
+   *
+   * @throws ScienceDaemonError with kind `not-found` when the daemon has no such conversation,
+   *   and otherwise when it cannot be reached or answers unexpectedly.
+   */
+  readTranscript(conversationId: string): Promise<TranscriptEntry[]>;
   /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
    * Aborting `cancel` stops the reply: see {@link Turn.events}.
@@ -112,6 +122,10 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
     async listConversations(projectId) {
       await socket.ready();
       return listConversations(http, projectId);
+    },
+    async readTranscript(conversationId) {
+      await socket.ready();
+      return readTranscript(http, conversationId);
     },
     startConversation: (projectId, message, cancel) =>
       startTurn(channel, cancel, async () => {

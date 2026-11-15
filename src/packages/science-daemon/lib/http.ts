@@ -63,7 +63,7 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
 
     if (!answer.ok) {
       throw new ScienceDaemonError(
-        "rejected",
+        answer.status === 404 ? "not-found" : "rejected",
         `Claude Science refused "${call}" (HTTP ${answer.status}): ${errorDetail(answer.text)}`,
       );
     }

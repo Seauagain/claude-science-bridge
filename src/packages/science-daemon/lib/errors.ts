@@ -10,6 +10,8 @@ export type ScienceDaemonErrorKind =
   | "unreachable"
   /** The daemon answered a request with an error. */
   | "rejected"
+  /** The daemon does not have what a request named, such as a conversation (HTTP 404). */
+  | "not-found"
   /** The daemon answered, but not in the shape this version understands. */
   | "unexpected-response"
   /** The caller cancelled a message before it was sent. Nothing went wrong. */
