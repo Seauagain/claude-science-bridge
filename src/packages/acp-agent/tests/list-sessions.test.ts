@@ -1,6 +1,7 @@
 import { methods } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Harness, startHarness } from "./support/harness.ts";
+import { type Harness, runTurn, startHarness } from "./support/harness.ts";
+import { loadSession } from "./support/loaded-session.ts";
 
 let harness: Harness;
 
@@ -10,6 +11,58 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await harness.dispose();
+});
+
+describe("listing the sessions of a folder in which the client has opened sessions", () => {
+  it("leaves out the conversation of a session the client opened, in the same adapter process", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const fromTheBrowser = harness.fake.addConversation(projectId, {
+      title: "Fold of GFP",
+      updatedAt: "2026-11-02T10:00:00Z",
+    });
+
+    const response = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "How do kinases find their substrates?");
+      return context.request(methods.agent.session.list, { cwd: folder });
+    });
+
+    expect(response.sessions.map((session) => session.sessionId)).toEqual([fromTheBrowser]);
+  });
+
+  it("leaves it out in a later adapter process too", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const fromTheBrowser = harness.fake.addConversation(projectId, {
+      title: "Fold of GFP",
+      updatedAt: "2026-11-02T10:00:00Z",
+    });
+    await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "How do kinases find their substrates?");
+    });
+
+    const response = await harness.withClient((context) =>
+      context.request(methods.agent.session.list, { cwd: folder }),
+    );
+
+    expect(response.sessions.map((session) => session.sessionId)).toEqual([fromTheBrowser]);
+  });
+
+  it("still lists a conversation that was loaded from the list and continued", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const fromTheBrowser = harness.fake.addConversation(projectId, {
+      title: "Fold of GFP",
+      updatedAt: "2026-11-02T10:00:00Z",
+    });
+
+    const response = await harness.withClient(async (context) => {
+      const session = await loadSession(harness, context, fromTheBrowser, folder);
+      await session.runTurn("How many strands?");
+      return context.request(methods.agent.session.list, { cwd: folder });
+    });
+
+    expect(response.sessions.map((session) => session.sessionId)).toEqual([fromTheBrowser]);
+  });
 });
 
 describe("listing the sessions of a folder", () => {

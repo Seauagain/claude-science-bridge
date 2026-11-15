@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { afterAll } from "vitest";
 import type { ScienceCli } from "../../../science-daemon/index.ts";
 import { runCli } from "../../index.ts";
 
@@ -7,7 +11,17 @@ export interface CliSurroundings {
   readonly scienceCli: ScienceCli;
   /** Working folder of the command. Defaults to a path that does not exist. */
   readonly cwd?: string;
+  /** Environment variables of the command. Defaults to none. */
+  readonly env?: Readonly<Record<string, string>>;
+  /**
+   * The home folder of the command. Defaults to a temporary folder shared by the commands of
+   * one test file, so that a test never reads or writes the home folder of whoever runs it.
+   */
+  readonly homeFolder?: string;
 }
+
+const scratchHome = mkdtempSync(join(tmpdir(), "csbridge-home-"));
+afterAll(() => rmSync(scratchHome, { recursive: true, force: true }));
 
 /** Starts one `csbridge` command on in-memory streams and collects what it prints. */
 export function startCli(argv: string[], surroundings: CliSurroundings) {
@@ -25,8 +39,9 @@ export function startCli(argv: string[], surroundings: CliSurroundings) {
     stdin,
     stdout,
     stderr,
-    env: {},
+    env: surroundings.env ?? {},
     cwd: surroundings.cwd ?? "/csbridge-test-no-such-folder",
+    homeFolder: surroundings.homeFolder ?? scratchHome,
     scienceCli: surroundings.scienceCli,
   });
   return { stdin, output, exitCode };

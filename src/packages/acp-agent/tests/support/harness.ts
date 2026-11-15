@@ -29,13 +29,27 @@ export interface Harness {
   /** Creates a temporary folder that is not linked to any project. */
   unlinkedFolder(): Promise<string>;
   /**
-   * Runs `use` as an ACP client connected to the agent, already initialized. The agent uses the
-   * fake daemon's Science CLI stand-in unless `options.scienceCli` replaces it, and the
-   * connection's production timing unless `options.timing` shortens it.
+   * The folder the harness's adapters keep their own state in, unless a client is given another
+   * one. It does not exist until an adapter creates it.
+   */
+  readonly stateFolder: string;
+  /** Creates an empty temporary folder that is removed with the harness. */
+  temporaryFolder(): Promise<string>;
+  /**
+   * Runs `use` as an ACP client connected to an agent of its own, already initialized. Each call
+   * stands for one adapter process: a second call is the adapter the client starts anew, on the
+   * same daemon and the same state folder. The agent uses the fake daemon's Science CLI stand-in
+   * unless `options.scienceCli` replaces it, the connection's production timing unless
+   * `options.timing` shortens it, and the harness's state folder unless `options.stateFolder`
+   * names another.
    */
   withClient<T>(
     use: (context: ClientContext) => Promise<T>,
-    options?: { scienceCli?: ScienceCli; timing?: Partial<ConnectionTiming> },
+    options?: {
+      scienceCli?: ScienceCli;
+      timing?: Partial<ConnectionTiming>;
+      stateFolder?: string;
+    },
   ): Promise<T>;
   /**
    * The updates the harness's clients have been sent for a session so far, oldest first. This
@@ -53,6 +67,7 @@ export async function startHarness(): Promise<Harness> {
     folders.push(folder);
     return folder;
   };
+  const stateFolder = join(await newFolder(), "state");
   const received: SessionNotification[] = [];
   const testClient = client({ name: "test-client" }).onNotification(
     methods.client.session.update,
@@ -70,6 +85,8 @@ export async function startHarness(): Promise<Harness> {
       return { folder, projectId };
     },
     unlinkedFolder: newFolder,
+    stateFolder,
+    temporaryFolder: newFolder,
     async withClient(use, options = {}) {
       const scienceCli = options.scienceCli ?? fake.scienceCli;
       const connections: Promise<ScienceDaemon>[] = [];
@@ -79,6 +96,7 @@ export async function startHarness(): Promise<Harness> {
           connections.push(connection);
           return connection;
         },
+        stateFolder: options.stateFolder ?? stateFolder,
         version: "0.0.0-test",
       });
       try {

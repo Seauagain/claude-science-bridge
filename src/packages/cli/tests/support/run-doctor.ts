@@ -33,6 +33,8 @@ export async function runDoctor(run: DoctorRun) {
     stderr,
     env: run.env ?? {},
     cwd: run.cwd,
+    // The doctor keeps no state.
+    homeFolder: "/csbridge-test-no-such-home",
     ...(run.scienceCli === undefined ? {} : { scienceCli: run.scienceCli }),
   });
   return { exitCode, lines: printed.stdout.trimEnd().split("\n"), stderr: printed.stderr };

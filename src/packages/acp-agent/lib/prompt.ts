@@ -9,6 +9,7 @@ import { findProjectLink } from "../../project-link/index.ts";
 import type { ScienceDaemon, Turn } from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import { promptText } from "./prompt-text.ts";
+import type { SessionRecord } from "./session-record.ts";
 
 /** An ACP session: the client's handle on at most one conversation. */
 export interface Session {
@@ -32,6 +33,8 @@ export interface PromptSurroundings {
   readonly client: AgentContext;
   /** The connection to the daemon, made on first use. */
   readonly daemon: () => Promise<ScienceDaemon>;
+  /** Where a session's conversation is recorded once the first prompt has started it. */
+  readonly record: SessionRecord;
 }
 
 /**
@@ -41,8 +44,9 @@ export interface PromptSurroundings {
 export async function answerPrompt(
   session: Session,
   request: PromptRequest,
-  { client, daemon }: PromptSurroundings,
+  surroundings: PromptSurroundings,
 ): Promise<PromptResponse> {
+  const { client } = surroundings;
   if (session.activePrompt !== undefined) {
     throw new RequestError(
       INVALID_REQUEST,
@@ -54,7 +58,7 @@ export async function answerPrompt(
   const cancel = new AbortController();
   session.activePrompt = cancel;
   try {
-    const turn = await sendPrompt(session, promptText(request.prompt), cancel.signal, daemon);
+    const turn = await sendPrompt(session, request, cancel.signal, surroundings);
     // Once the client has cancelled, the turn has no more reply text and ends as cancelled.
     for await (const event of turn.events) {
       if (event.type === "reply-text") {
@@ -87,16 +91,20 @@ export async function answerPrompt(
 /** Sends a message to the session's conversation, starting the conversation if there is none. */
 async function sendPrompt(
   session: Session,
-  message: string,
+  request: PromptRequest,
   cancel: AbortSignal,
-  daemon: () => Promise<ScienceDaemon>,
+  { daemon, record }: PromptSurroundings,
 ): Promise<Turn> {
+  const message = promptText(request.prompt);
   if (session.conversationId !== undefined) {
     return (await daemon()).sendMessage(session.conversationId, message, cancel);
   }
   const projectId = await linkedProjectId(session.cwd);
   const turn = await (await daemon()).startConversation(projectId, message, cancel);
   session.conversationId = turn.conversationId;
+  // From here on the session can be loaded by another adapter process. If this fails, so does
+  // the prompt, although its turn runs on: the user has to learn that the thread will be lost.
+  await record.remember(request.sessionId, turn.conversationId);
   return turn;
 }
 

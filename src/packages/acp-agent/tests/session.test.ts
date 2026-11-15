@@ -27,8 +27,9 @@ describe("initializing", () => {
       title: "Claude Science",
     });
     expect(response.agentCapabilities).toEqual({
-      loadSession: false,
+      loadSession: true,
       promptCapabilities: { image: false, audio: false, embeddedContext: false },
+      sessionCapabilities: { list: {} },
     });
   });
 });

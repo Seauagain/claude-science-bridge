@@ -28,7 +28,16 @@ async function run(argv: string[], env: Record<string, string>) {
     output.stderr += String(chunk);
   });
   stdin.end();
-  await runCli(argv, { stdin, stdout, stderr, env, cwd: tmpdir(), scienceCli: fake.scienceCli });
+  await runCli(argv, {
+    stdin,
+    stdout,
+    stderr,
+    env,
+    cwd: tmpdir(),
+    // Neither command keeps state.
+    homeFolder: "/csbridge-test-no-such-home",
+    scienceCli: fake.scienceCli,
+  });
   return output;
 }
 

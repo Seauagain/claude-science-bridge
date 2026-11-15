@@ -47,6 +47,10 @@ export function acpClient(adapter: RunningAdapter) {
       }
       throw new Error(`session/new answered ${JSON.stringify(result)}`);
     },
+    /** Loads an existing session in `folder`. Rejects when the adapter does not find it. */
+    async loadSession(sessionId: string, folder: string): Promise<void> {
+      await request("session/load", { sessionId, cwd: folder, mcpServers: [] });
+    },
     /** Sends one prompt and waits for the turn to end. */
     async prompt(sessionId: string, text: string): Promise<void> {
       await request("session/prompt", { sessionId, prompt: [{ type: "text", text }] });
