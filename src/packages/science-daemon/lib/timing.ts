@@ -3,6 +3,12 @@
  * daemon; tests pass shorter values.
  */
 export interface ConnectionTiming {
+  /**
+   * How long the daemon may take to answer any single request: an HTTP request, a step of the
+   * login, or the handshake of the event socket. A request that runs out of time fails as
+   * `unreachable`. Default: 30 000.
+   */
+  readonly requestTimeoutMs: number;
   /** How often the event socket is pinged. Default: 25 000, as the daemon's web client does. */
   readonly pingIntervalMs: number;
   /** How long a pong may take before the socket counts as dropped. Default: 10 000. */
@@ -20,6 +26,7 @@ export interface ConnectionTiming {
 }
 
 export const DEFAULT_TIMING: ConnectionTiming = {
+  requestTimeoutMs: 30_000,
   pingIntervalMs: 25_000,
   pongTimeoutMs: 10_000,
   reconnectDelayMs: 1_000,

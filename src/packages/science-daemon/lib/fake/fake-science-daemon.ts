@@ -62,6 +62,15 @@ export interface FakeScienceDaemon {
   answerPings(answer: boolean): void;
 
   /**
+   * Makes the daemon answer requests and socket handshakes (the default) or, while false, accept
+   * their connections and then say nothing, as a daemon that hangs does. What arrives meanwhile
+   * is never answered, also not once the daemon answers again. Event sockets that are open
+   * already are not affected: see {@link answerPings} and {@link dropEventSockets}. The Science
+   * CLI stand-in goes on reporting the daemon as running.
+   */
+  answerRequests(answer: boolean): void;
+
+  /**
    * Stops the daemon as when its process exits: event sockets drop, requests find nobody
    * listening, the Science CLI stand-in reports it as not running, and logins are forgotten.
    * Projects and conversations are kept.

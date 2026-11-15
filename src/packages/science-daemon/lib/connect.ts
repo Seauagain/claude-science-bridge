@@ -79,14 +79,18 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   const endpoint = await locateDaemon(options.scienceCli, options.startCommand);
   const versionWarning = untestedVersionWarning(endpoint.version);
   if (versionWarning !== undefined) options.onWarning?.(versionWarning);
-  const login = await logIn(endpoint, options.scienceCli);
-  const access = new DaemonAccess(options.scienceCli, endpoint, login, options.startCommand);
+  const timing: ConnectionTiming = { ...DEFAULT_TIMING, ...options.timing };
+  const login = await logIn(endpoint, options.scienceCli, timing.requestTimeoutMs);
+  const access = new DaemonAccess(
+    options.scienceCli,
+    endpoint,
+    login,
+    timing.requestTimeoutMs,
+    options.startCommand,
+  );
   const http = createDaemonHttp(access);
   const me = expectRecord(await http.get("/me"), "GET /me");
-  const socket = await openDaemonSocket(access, expectString(me, "user_id", "GET /me"), {
-    ...DEFAULT_TIMING,
-    ...options.timing,
-  });
+  const socket = await openDaemonSocket(access, expectString(me, "user_id", "GET /me"), timing);
 
   return {
     async listProjects() {

@@ -38,12 +38,17 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #conversations = new FakeConversations((event) => this.#sockets.broadcast(event));
   readonly #projects = new Map<string, Project>();
   readonly #responseOverrides = new Map<string, unknown>();
+  /** Sockets whose handshake was left unanswered, kept so that stopping the daemon cuts them. */
+  readonly #unansweredHandshakes = new Set<Duplex>();
   #port = 0;
   #running = true;
+  #answering = true;
   #version = OBSERVED_VERSION;
 
   constructor() {
     this.#server = createServer((request, response) => {
+      // A request that arrives while the daemon does not answer is never answered.
+      if (!this.#answering) return;
       this.#handle(request, response).catch((error: unknown) => {
         sendJson(response, 500, { detail: `fake daemon bug: ${String(error)}` });
       });
@@ -142,8 +147,13 @@ class FakeDaemon implements FakeScienceDaemon {
     this.#sockets.answerPings(answer);
   }
 
+  answerRequests(answer: boolean): void {
+    this.#answering = answer;
+  }
+
   async stop(): Promise<void> {
     this.#sockets.drop();
+    for (const socket of this.#unansweredHandshakes) socket.destroy();
     this.#logins.expire();
     if (!this.#server.listening) return;
     this.#server.closeAllConnections();
@@ -221,6 +231,11 @@ class FakeDaemon implements FakeScienceDaemon {
   }
 
   #upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+    if (!this.#answering) {
+      this.#unansweredHandshakes.add(socket);
+      socket.once("close", () => this.#unansweredHandshakes.delete(socket));
+      return;
+    }
     const accepted =
       (request.url ?? "").startsWith("/api/ws") &&
       this.#logins.acceptsSocket(request, this.#origin);

@@ -6,6 +6,7 @@ import { createDaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
 import { runScienceCli, type ScienceCli } from "./science-cli.ts";
 import { untestedVersionWarning } from "./tested-versions.ts";
+import { DEFAULT_TIMING } from "./timing.ts";
 
 /** The result of one check of the user's setup, to be shown on one line. */
 export interface SetupCheck {
@@ -45,8 +46,10 @@ export async function checkDaemonSetup(
         : { name: "Daemon version", status: "warning", message: warning },
     );
 
-    const login = await logIn(endpoint, scienceCli);
-    await createDaemonHttp(new DaemonAccess(scienceCli, endpoint, login)).get("/me");
+    const { requestTimeoutMs } = DEFAULT_TIMING;
+    const login = await logIn(endpoint, scienceCli, requestTimeoutMs);
+    const access = new DaemonAccess(scienceCli, endpoint, login, requestTimeoutMs);
+    await createDaemonHttp(access).get("/me");
     checks.push({ name: "Login", status: "pass", message: "the daemon accepted a login link" });
   } catch (error) {
     if (!(error instanceof ScienceDaemonError)) throw error;
