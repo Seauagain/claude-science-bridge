@@ -154,7 +154,7 @@ describe("csbridge doctor", () => {
   });
 
   it("fails naming the marker file when the project link cannot be used", async () => {
-    const markerFile = join(unlinkedFolder, ".claude-science", "project.json");
+    const markerFile = join(unlinkedFolder, ".csbridge", "project.json");
     await mkdir(dirname(markerFile));
     await writeFile(markerFile, "{ not json", "utf8");
 

@@ -32,9 +32,7 @@ describe("writeProjectLink", () => {
       { now: () => new Date("2026-11-15T08:00:00Z") },
     );
 
-    const marker = JSON.parse(
-      await readFile(join(root, ".claude-science", "project.json"), "utf8"),
-    );
+    const marker = JSON.parse(await readFile(join(root, ".csbridge", "project.json"), "utf8"));
     expect(marker).toEqual({
       schemaVersion: 1,
       projectId: "proj_aaaaaaaaaaaa",
