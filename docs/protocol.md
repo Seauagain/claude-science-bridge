@@ -138,10 +138,60 @@ Rules that follow from what was observed:
 - Events of sub-agent frames are expected to carry the conversation's `root_frame_id` with their
   own `frame_id`. **[web]**
 
+## Recovery
+
+What the adapter does when the login or the connection is lost. Nothing in this section was
+observed on the real daemon: each point names the fact it builds on and the reading chosen where
+there is none. The fake daemon behaves as described here.
+
+- **Expired login.** A request answered 401 gets one new login (steps 1 to 3 of "Login") and is
+  sent once more; a second 401 is an error. This builds on "a 401 means the login is gone".
+  **[open]**
+- **Stale CSRF token.** A write answered 403 with `code: "csrf_stale"` is followed by
+  `GET /api/csrf` and sent once more. **[web]** How that response hands over the new token is not
+  known: the adapter takes it from an `operon_csrf` cookie the response sets, as at login, and
+  ignores the body. The fake sets the cookie and answers `{}`. **[open]**
+- **Keeping the socket alive.** The adapter pings every 25 s and treats the socket as dropped
+  when no `pong` arrives within 10 s, as "WebSocket" above says the web client does.
+- **Reopening the socket.** A dropped socket is reopened, with a growing wait between attempts
+  (1 s, doubling, at most 10 s) for 60 s. Each attempt first runs `claude-science status`, so a
+  daemon that came back on another port is found. A handshake answered 401 gets one new login
+  and one more handshake. The fake keeps the sockets of an expired login open and refuses new
+  handshakes with 401; whether the real daemon closes such sockets, and what it answers to a
+  handshake without a login, is not known. Whether a restarted daemon keeps its port and its
+  logins is not known either: the fake comes back on a new port and without its logins.
+  **[open]**
+- **Catching up after a gap.** Events sent while the socket was down are lost, and nothing says
+  whether text streamed after the gap continues what was received before it. So once the socket
+  was reopened during a turn, the adapter stops using `text_chunk` events for that turn and reads
+  `GET /frames/<id>?shallow=true` and then the last page of `GET /frames/<id>/messages`, right
+  after reopening and again whenever a terminal `frame_update` arrives. From the last message,
+  if its `role` is `assistant`, it takes the text and delivers the part not delivered yet; a
+  terminal status ends the turn. This builds on "reply text can be read from the last assistant
+  message" **[live]** and on these readings, all **[open]**:
+  - A reply's text is the concatenation of the `text` of its content blocks of
+    `type: "text"`, and equals what `text_chunk` events with `block_type: "text"` streamed.
+  - A message appears in the transcript once it is complete, not while it is streamed. The fake
+    commits a reply as one assistant message when the turn ends, so text missed in a gap arrives
+    at the end of the turn.
+  - By the time the daemon has accepted a message (the HTTP response has arrived), the user's
+    message is in the transcript and the frame's status is that of the new turn, so a terminal
+    status read afterwards means this turn has ended.
+  - `from` is a zero-based index into the transcript and `total` its length. The adapter walks
+    the pages (`limit=100`) until `from` plus the number of messages returned reaches `total`.
+    The fake refuses a request without `from` and `limit`.
+  - The frame returned by `GET /frames/<id>` carries the same `status_description` as a
+    `frame_update` does.
+
+  In a turn with several assistant messages (tool use), only the last one is read this way: text
+  of earlier messages that was streamed during or after the gap is not delivered.
+
 ## Open questions
 
 1. Can a conversation be started without a project? **[open]**
-2. Login lifetime, and what an expired login looks like on the WebSocket. **[open]**
+2. Login lifetime, and what an expired login looks like on the WebSocket: whether the daemon
+   closes the socket, and what it answers to a new handshake. See "Recovery" for the reading the
+   adapter and the fake use. **[open]**
 3. Exact shape of `pending_input_requests` and of the `responses` that answer them. **[open]**
 4. What `POST /frames/<id>/cancel` answers, and whether it changes the frame's status, for a
    conversation with no running turn or for an unknown id. The adapter only cancels a turn it is
@@ -152,3 +202,10 @@ Rules that follow from what was observed:
    archived when `archived_at` is anything but null or absent, and reads only the one response;
    the fake daemon sends null for a project in use and a timestamp string for an archived one.
    **[open]**
+6. What `GET /api/csrf` answers, and whether a token issued earlier stays valid. **[open]**
+7. What a restarted daemon makes of a turn it was running: whether the frame stays `processing`,
+   and whether the conversation then takes a further message. The adapter keeps following such a
+   turn until its status changes or the user cancels. **[open]**
+8. The shape of a message's content blocks, when a streamed message enters the transcript, and
+   how the text of a turn with several assistant messages relates to its `text_chunk` events.
+   See "Recovery". **[open]**

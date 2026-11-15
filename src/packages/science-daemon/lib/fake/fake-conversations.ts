@@ -66,6 +66,8 @@ export class FakeConversations {
   readonly #scripts: ReplyScript[] = [];
   readonly #intentIds = new Set<string>();
   readonly #cancelRequests: string[] = [];
+  /** Callers of {@link nextTranscriptRead} that are still waiting. */
+  readonly #awaitingTranscriptRead: (() => void)[] = [];
   readonly #broadcast: (event: JsonRecord) => void;
 
   /** `broadcast` pushes an event to every open event socket. */
@@ -91,6 +93,11 @@ export class FakeConversations {
 
   cancelRequests(): string[] {
     return [...this.#cancelRequests];
+  }
+
+  /** Resolves the next time a page of a transcript is served. */
+  nextTranscriptRead(): Promise<void> {
+    return new Promise((resolve) => this.#awaitingTranscriptRead.push(resolve));
   }
 
   /** `POST /projects/<project_id>/request`, for a project that exists. */
@@ -198,6 +205,7 @@ export class FakeConversations {
         },
       };
     }
+    for (const resolve of this.#awaitingTranscriptRead.splice(0)) resolve();
     const page = conversation.transcript.slice(from, from + limit).map(({ role, text }) => ({
       role,
       content: [{ type: "text", text }],

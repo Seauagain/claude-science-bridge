@@ -67,6 +67,23 @@ The `claude-science` executable is looked for in this order: the `--claude-scien
 option, the `CLAUDE_SCIENCE_BIN` environment variable, `PATH`, and `bin/` in the default Claude
 Science data folder.
 
+## When the login or the connection is lost
+
+`csbridge acp` is meant to stay up for as long as the client does, so it looks after its
+connection to Claude Science by itself:
+
+- When Claude Science stops accepting the login, the adapter logs in again and repeats the
+  request. You see nothing of it.
+- The event connection is pinged. When it drops, or stops answering, the adapter opens a new one,
+  waiting a little longer after each failed attempt. A reply that was being streamed goes on:
+  text that was sent in the meantime is fetched from the conversation, once, and may arrive only
+  when the reply is finished.
+- When Claude Science stays away for more than a minute, running replies end with an error that
+  says so. The adapter keeps running: once Claude Science is back, the next prompt in the same
+  session works again, even when it now listens on another port.
+
+An error that says the login could not be renewed points at the setup: run `csbridge doctor`.
+
 ## Roadmap
 
 - [ ] Minimal adapter: new conversation, plain-text streaming replies

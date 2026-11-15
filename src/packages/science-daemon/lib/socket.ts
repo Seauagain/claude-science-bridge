@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { type DaemonAccess, LOGIN_NOT_RENEWED } from "./access.ts";
+import { type DaemonAccess, newLoginRejected } from "./access.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import { type Heartbeat, keepAlive } from "./heartbeat.ts";
 import type { Login } from "./login.ts";
@@ -83,11 +83,7 @@ class EventSocket implements DaemonSocket {
     const login = this.#access.login;
     if ((await this.#handshake(login)) === "open") return;
     if ((await this.#handshake(await this.#access.renewLogin(login))) === "open") return;
-    throw new ScienceDaemonError(
-      "login-failed",
-      `${LOGIN_NOT_RENEWED} Claude Science turned away a new login as well. ` +
-        "Run `csbridge doctor` to check the login, then send the prompt again.",
-    );
+    throw newLoginRejected();
   }
 
   ready(): Promise<void> {

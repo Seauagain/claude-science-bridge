@@ -4,7 +4,16 @@ import { type Login, logIn, refreshCsrfToken } from "./login.ts";
 import type { ScienceCli } from "./science-cli.ts";
 
 /** How every error about a login that could not be replaced begins. */
-export const LOGIN_NOT_RENEWED = "The login to Claude Science expired and could not be renewed.";
+const LOGIN_NOT_RENEWED = "The login to Claude Science expired and could not be renewed.";
+
+/** The error for a new login that the daemon turned away just like the one it replaced. */
+export function newLoginRejected(): ScienceDaemonError {
+  return new ScienceDaemonError(
+    "login-failed",
+    `${LOGIN_NOT_RENEWED} Claude Science turned away a new login as well. ` +
+      "Run `csbridge doctor` to check the login, then try again.",
+  );
+}
 
 /**
  * Where the daemon is and the login it accepts, kept current for everything that talks to it.

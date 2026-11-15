@@ -1,4 +1,4 @@
-import { type DaemonAccess, LOGIN_NOT_RENEWED } from "./access.ts";
+import { type DaemonAccess, newLoginRejected } from "./access.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import type { Login } from "./login.ts";
 import { isRecord, type JsonRecord } from "./validate.ts";
@@ -17,8 +17,9 @@ interface HttpAnswer {
 }
 
 /**
- * Requests that recover by themselves from a login the daemon no longer accepts: one new login,
- * one retry. See "Requests" in docs/protocol.md.
+ * Requests that recover by themselves from a login the daemon no longer accepts (one new login,
+ * one retry) and from a CSRF token it calls stale (one new token, one retry). See "Requests" and
+ * "Recovery" in docs/protocol.md.
  */
 export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
   const exchange = async (
@@ -59,13 +60,7 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
     // send it again.
     if (answer.status === 401) {
       answer = await exchange(await access.renewLogin(login), method, path, body);
-      if (answer.status === 401) {
-        throw new ScienceDaemonError(
-          "login-failed",
-          `${LOGIN_NOT_RENEWED} Claude Science turned away a new login as well. ` +
-            "Run `csbridge doctor` to check the login, then send the prompt again.",
-        );
-      }
+      if (answer.status === 401) throw newLoginRejected();
     } else if (hasStaleCsrfToken(answer)) {
       answer = await exchange(await access.refreshCsrfToken(login), method, path, body);
     }

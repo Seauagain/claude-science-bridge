@@ -12,7 +12,14 @@ import { type ConnectionTiming, DEFAULT_TIMING } from "./timing.ts";
 import { type Turn, TurnTracker } from "./turn.ts";
 import { expectRecord, expectString } from "./validate.ts";
 
-/** A logged-in connection to the local Claude Science daemon. */
+/**
+ * A logged-in connection to the local Claude Science daemon.
+ *
+ * The connection looks after itself. It logs in again when the daemon stops accepting the login,
+ * keeps its event socket alive, and reopens the socket when it drops. A method fails only when
+ * that did not help, and the connection remains usable afterwards: once the daemon is back, the
+ * next call finds it again, even on another port.
+ */
 export interface ScienceDaemon {
   /**
    * Lists the user's projects that are not archived, in the daemon's order.
@@ -33,7 +40,10 @@ export interface ScienceDaemon {
    * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached.
    */
   sendMessage(conversationId: string, message: string): Promise<Turn>;
-  /** Closes the connection. Turns still running stop producing events. */
+  /**
+   * Closes the connection for good and stops every attempt to restore it. Turns still running
+   * stop producing events.
+   */
   close(): void;
 }
 
@@ -88,14 +98,13 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
         );
         return expectString(response, "root_frame_id", call);
       }),
-    async sendMessage(conversationId, message) {
-      await socket.ready();
-      const frameCall = "GET /frames/<id>";
-      const frame = expectRecord(
-        await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
-        frameCall,
-      );
-      return startTurn(http, socket, async () => {
+    sendMessage: (conversationId, message) =>
+      startTurn(http, socket, async () => {
+        const frameCall = "GET /frames/<id>";
+        const frame = expectRecord(
+          await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
+          frameCall,
+        );
         await http.post("/request", {
           target_agent: expectString(frame, "agent_name", frameCall),
           root_frame_id: conversationId,
@@ -105,8 +114,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
           input_data: { request: message },
         });
         return conversationId;
-      });
-    },
+      }),
     close: () => socket.close(),
   };
 }

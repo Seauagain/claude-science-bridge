@@ -3,4 +3,5 @@
  * implements docs/protocol.md. Not part of the built program.
  */
 export type { FakeConversation, FakeTurn, ReplyScript } from "./lib/fake/fake-conversations.ts";
-export { type FakeScienceDaemon, startFakeScienceDaemon } from "./lib/fake/fake-daemon.ts";
+export { startFakeScienceDaemon } from "./lib/fake/fake-daemon.ts";
+export type { FakeScienceDaemon } from "./lib/fake/fake-science-daemon.ts";

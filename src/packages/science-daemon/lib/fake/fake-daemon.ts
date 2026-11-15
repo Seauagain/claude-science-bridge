@@ -11,72 +11,8 @@ import {
 } from "./fake-conversations.ts";
 import { FakeEventSockets } from "./fake-event-sockets.ts";
 import { FakeLogins } from "./fake-logins.ts";
+import type { FakeScienceDaemon } from "./fake-science-daemon.ts";
 import { type Answer, readBody, sendJson } from "./http-exchange.ts";
-
-/** A stand-in for the Claude Science daemon that implements docs/protocol.md. */
-export interface FakeScienceDaemon {
-  /** A Science CLI stand-in that answers `status` and `url` for this fake daemon. */
-  readonly scienceCli: ScienceCli;
-  /** Makes the Science CLI stand-in report the daemon as running (the default) or not running. */
-  reportRunning(running: boolean): void;
-  /** Makes the Science CLI stand-in report `version` instead of the version protocol.md covers. */
-  reportVersion(version: string): void;
-  /**
-   * Answers the next logged-in request to `route` (for example `"GET /api/me"`) with `body`
-   * instead of the usual response, as a daemon version with a different interface would.
-   */
-  respondOnce(route: string, body: unknown): void;
-  /**
-   * Makes every login issued so far expire: requests that carry one are answered 401 and new
-   * socket handshakes are refused. Sockets that are already open stay open.
-   */
-  expireLogins(): void;
-  /**
-   * While false, the daemon treats every request as not logged in, even one that carries a login
-   * it issued a moment ago. It accepts logins by default.
-   */
-  acceptLogins(accept: boolean): void;
-  /** How many logins the daemon has issued, each in exchange for a login link. */
-  loginCount(): number;
-  /**
-   * Makes every CSRF token issued so far stale: a write that carries one is answered 403 with
-   * `code: "csrf_stale"` until the client has fetched a new token from `GET /api/csrf`.
-   */
-  expireCsrfTokens(): void;
-  /** Creates a project, archived if asked, and returns its identifier. */
-  addProject(name: string, options?: { readonly archived?: boolean }): string;
-  /** Queues the script for the next message. Unscripted messages get the reply "pong". */
-  onNextMessage(script: ReplyScript): void;
-  /** Every conversation started so far, oldest first. */
-  conversations(): FakeConversation[];
-  /**
-   * Identifiers of the conversations a cancel was requested for, oldest request first. Includes
-   * requests that found no running turn.
-   */
-  cancelRequests(): string[];
-  /** Pushes an event to every open socket, as the daemon does for the user's other activity. */
-  broadcast(event: JsonRecord): void;
-  /** How many event sockets are open right now. */
-  eventConnectionCount(): number;
-  /** Cuts every open event socket without a closing handshake. The daemon itself stays up. */
-  dropEventSockets(): void;
-  /** Resolves the next time a client opens an event socket. */
-  nextEventSocket(): Promise<void>;
-  /** Resolves the next time a ping arrives on an event socket. */
-  nextPing(): Promise<void>;
-  /** Makes the daemon answer pings with a pong (the default) or leave them unanswered. */
-  answerPings(answer: boolean): void;
-  /**
-   * Stops the daemon as when its process exits: event sockets drop, requests find nobody
-   * listening, the Science CLI stand-in reports it as not running, and logins are forgotten.
-   * Projects and conversations are kept.
-   */
-  stop(): Promise<void>;
-  /** Starts a stopped daemon again. It listens on a new port. */
-  start(): Promise<void>;
-  /** Stops the daemon for good. */
-  close(): Promise<void>;
-}
 
 interface Project {
   readonly name: string;
@@ -176,6 +112,10 @@ class FakeDaemon implements FakeScienceDaemon {
 
   cancelRequests(): string[] {
     return this.#conversations.cancelRequests();
+  }
+
+  nextTranscriptRead(): Promise<void> {
+    return this.#conversations.nextTranscriptRead();
   }
 
   broadcast(event: JsonRecord): void {

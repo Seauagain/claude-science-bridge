@@ -4,9 +4,9 @@ export type ScienceDaemonErrorKind =
   | "science-cli-failed"
   /** The Science CLI reports that no daemon is running. */
   | "not-running"
-  /** The daemon did not accept the login link. */
+  /** The daemon did not accept the login link, or a login that expired could not be renewed. */
   | "login-failed"
-  /** The daemon could not be reached over the network. */
+  /** The daemon could not be reached over the network, or the connection to it was lost. */
   | "unreachable"
   /** The daemon answered a request with an error. */
   | "rejected"

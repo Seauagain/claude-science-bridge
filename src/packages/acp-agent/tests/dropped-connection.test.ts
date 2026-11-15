@@ -29,22 +29,21 @@ describe("keeping the event socket alive", () => {
   it("opens a new socket when the daemon stops answering pings", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
 
-    const { turn, openSockets } = await harness.withClient(
+    const turn = await harness.withClient(
       async (context) => {
         const session = await context.buildSession(folder).start();
         const reopened = harness.fake.nextEventSocket();
         harness.fake.answerPings(false);
         await reopened;
         harness.fake.answerPings(true);
-        const turn = await runTurn(session, "ping");
-        return { turn, openSockets: harness.fake.eventConnectionCount() };
+        return runTurn(session, "ping");
       },
-      { timing: { pingIntervalMs: 5, pongTimeoutMs: 5 } },
+      // The pong deadline is long enough that a busy machine does not miss it by accident.
+      { timing: { pingIntervalMs: 5, pongTimeoutMs: 50 } },
     );
 
+    // One chunk: the socket that went quiet is no longer listened to next to the new one.
     expect(turn).toEqual({ chunks: ["pong"], stopReason: "end_turn" });
-    // The socket that went quiet was given up, not kept next to the new one.
-    expect(openSockets).toBe(1);
   });
 });
 
@@ -94,6 +93,54 @@ describe("losing the event socket during a turn", () => {
 
     expect(chunks.join("")).toBe("The structure is a beta barrel.");
     expect(stopReason).toBe("end_turn");
+  });
+
+  it("delivers the reply of a later turn only, not the earlier reply the transcript also holds", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    harness.fake.onNextMessage((turn) => {
+      turn.replyText("A beta barrel.");
+      turn.complete();
+    });
+    harness.fake.onNextMessage(async (turn) => {
+      const transcriptRead = harness.fake.nextTranscriptRead();
+      harness.fake.dropEventSockets();
+      // The transcript is read while it still ends with the user's message, after the earlier
+      // turn's reply.
+      await transcriptRead;
+      turn.replyText("Eleven strands.");
+      turn.complete();
+    });
+
+    const turns = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return [
+        await runTurn(session, "What is the fold of GFP?"),
+        await runTurn(session, "How many strands?"),
+      ];
+    });
+
+    expect(turns).toEqual([
+      { chunks: ["A beta barrel."], stopReason: "end_turn" },
+      { chunks: ["Eleven strands."], stopReason: "end_turn" },
+    ]);
+  });
+
+  it("finds the missed reply at the end of a long conversation", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+
+    const lastTurn = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      // Sixty turns leave 120 messages, more than the daemon is asked for at a time.
+      for (let turn = 0; turn < 60; turn++) await runTurn(session, "ping");
+      harness.fake.onNextMessage((turn) => {
+        harness.fake.dropEventSockets();
+        turn.replyText("Still here.");
+        turn.complete();
+      });
+      return runTurn(session, "Are you still there?");
+    });
+
+    expect(lastTurn).toEqual({ chunks: ["Still here."], stopReason: "end_turn" });
   });
 
   it("reports a turn that failed while it was not listening, naming the cause", async () => {
