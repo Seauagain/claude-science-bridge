@@ -134,11 +134,15 @@ export class TurnTracker {
     if (event.frame_id !== this.#conversationId) return;
 
     if (event.type === "text_chunk") {
+      // Reasoning text (`block_type: "thinking"`) is not part of the reply.
       const streamed = event.block_type === "text" && typeof event.chunk === "string";
       if (streamed && !this.#eventsMissed) this.#deliver(String(event.chunk));
     } else if (event.type === "frame_update") {
       this.#acceptStatus(event);
     }
+    // `text_reset` is left unhandled on purpose. It tells a client to discard the text streamed
+    // so far because the reply starts over, and the consumer cannot do that: ACP has no way to
+    // take back text the client has been sent. The restarted reply follows what was delivered.
   }
 
   #acceptStatus(event: DaemonEvent): void {

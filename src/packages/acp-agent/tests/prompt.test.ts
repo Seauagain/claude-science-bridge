@@ -34,6 +34,40 @@ describe("prompting a session", () => {
     ]);
   });
 
+  it("does not pass reasoning text on as reply text", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    harness.fake.onNextMessage((turn) => {
+      turn.reasoningText("The user asks about GFP. ");
+      turn.replyText("A beta barrel.");
+      turn.reasoningText("That answers it.");
+      turn.complete();
+    });
+
+    const turn = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "What is the fold of GFP?");
+    });
+
+    expect(turn).toEqual({ chunks: ["A beta barrel."], stopReason: "end_turn" });
+  });
+
+  it("leaves out empty pieces of reply text", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    harness.fake.onNextMessage((turn) => {
+      turn.replyText("");
+      turn.replyText("A beta barrel.");
+      turn.replyText("");
+      turn.complete();
+    });
+
+    const turn = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "What is the fold of GFP?");
+    });
+
+    expect(turn).toEqual({ chunks: ["A beta barrel."], stopReason: "end_turn" });
+  });
+
   it("ignores events of other conversations and of sub-agent frames", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
     harness.fake.onNextMessage((turn) => {

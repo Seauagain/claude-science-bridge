@@ -9,8 +9,10 @@ export interface FakeTurn {
   readonly conversationId: string;
   /** The user message that started the turn. */
   readonly message: string;
-  /** Streams one piece of reply text. */
+  /** Streams one piece of reply text. An empty piece is sent as such, as the daemon does. */
   replyText(chunk: string): void;
+  /** Streams one piece of reasoning text, which does not become part of the reply. */
+  reasoningText(chunk: string): void;
   /** Ends the turn successfully. */
   complete(): void;
   /** Ends the turn as failed, with the reason the daemon would report. */
@@ -253,6 +255,10 @@ export class FakeConversations {
         if (finished) return;
         reply += chunk;
         this.#emit(conversation, { type: "text_chunk", block_type: "text", chunk });
+      },
+      reasoningText: (chunk) => {
+        if (finished) return;
+        this.#emit(conversation, { type: "text_chunk", block_type: "thinking", chunk });
       },
       complete: () => finish("completed"),
       fail: (description) => finish("failed", description),
