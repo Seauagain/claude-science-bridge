@@ -24,8 +24,7 @@ Commands:
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command] = argv;
-  const executable = io.env.CLAUDE_SCIENCE_BIN;
-  const scienceCli = io.scienceCli ?? createScienceCli(executable ? { executable } : {});
+  const scienceCli = io.scienceCli ?? createScienceCli({ env: io.env });
 
   if (command === "acp") return runAcpCommand({ ...io, scienceCli });
 
