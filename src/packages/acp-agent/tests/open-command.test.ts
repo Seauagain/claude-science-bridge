@@ -46,6 +46,36 @@ describe("the /open command, in a session that has no conversation yet", () => {
     );
   });
 
+  it("tells the client the model and effort the conversation has", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const conversationId = harness.fake.addConversation(projectId, {
+      title: "Fold of GFP",
+      updatedAt: "2026-11-02T10:00:00Z",
+      model: "model-small",
+      effort: "low",
+    });
+
+    const updates = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, `/open ${conversationId}`);
+      return harness.updates(session.sessionId);
+    });
+
+    const reported = updates.flatMap((update) =>
+      update.sessionUpdate === "config_option_update" ? [update.configOptions] : [],
+    );
+    expect(reported).toHaveLength(1);
+    expect(
+      reported[0]?.map((option) => ({
+        id: option.id,
+        current: option.type === "select" ? option.currentValue : undefined,
+      })),
+    ).toEqual([
+      { id: "model", current: "model-small" },
+      { id: "effort", current: "low" },
+    ]);
+  });
+
   it("makes the session continue that conversation", async () => {
     const { folder, conversationId } = await projectWithConversation();
 

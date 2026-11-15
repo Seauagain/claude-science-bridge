@@ -44,7 +44,8 @@ export interface Harness {
    * same daemon and the same state folder. The agent uses the fake daemon's Science CLI stand-in
    * unless `options.scienceCli` replaces it, the connection's production timing unless
    * `options.timing` shortens it, and the harness's state folder unless `options.stateFolder`
-   * names another.
+   * names another. The client names itself `options.clientName` when it initializes, and
+   * gives no name without it.
    */
   withClient<T>(
     use: (context: ClientContext) => Promise<T>,
@@ -52,6 +53,7 @@ export interface Harness {
       scienceCli?: ScienceCli;
       timing?: Partial<ConnectionTiming>;
       stateFolder?: string;
+      clientName?: string;
     },
   ): Promise<T>;
   /**
@@ -112,6 +114,9 @@ export async function startHarness(): Promise<Harness> {
           await context.request(methods.agent.initialize, {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: {},
+            ...(options.clientName === undefined
+              ? {}
+              : { clientInfo: { name: options.clientName, version: "0.0.0" } }),
           });
           return use(context);
         });

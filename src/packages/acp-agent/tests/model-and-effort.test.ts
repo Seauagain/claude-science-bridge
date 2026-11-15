@@ -192,3 +192,80 @@ describe("a conversation that is loaded", () => {
     ]);
   });
 });
+
+// T3 Code refuses a change of model on a thread that has no session bound to it, which is every
+// thread that was settled or only imported. It takes a change of any other option at any time.
+describe("the model, for T3 Code", () => {
+  it.each(["t3-code", "t3-code-provider-test", "t3-code-session-manager"])(
+    "is an option like any other for the client %s, so that it can always be changed",
+    async (clientName) => {
+      const { folder } = await harness.linkedFolder("Protein folding");
+
+      const opened = await harness.withClient((context) => openSession(context, folder), {
+        clientName,
+      });
+
+      expect(summary(opened.configOptions)).toEqual([
+        {
+          id: "model",
+          category: undefined,
+          current: "model-large",
+          choices: ["model-large=Large", "model-small=Small", "model-basic=Basic"],
+        },
+        {
+          id: "effort",
+          category: "thought_level",
+          current: "medium",
+          choices: ["low=Low", "medium=Medium", "high=High", "max=Max"],
+        },
+      ]);
+    },
+  );
+
+  it("is chosen the same way, and stays a plain option in what is sent back", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+
+    const changed = await harness.withClient(
+      async (context) => {
+        const { sessionId } = await openSession(context, folder);
+        const answer = await choose(context, sessionId, "model", "model-small");
+        await prompt(context, sessionId, "What is the fold of GFP?");
+        return answer;
+      },
+      { clientName: "t3-code" },
+    );
+
+    expect(summary(changed.configOptions)[0]).toMatchObject({
+      id: "model",
+      category: undefined,
+      current: "model-small",
+    });
+    expect(harness.fake.conversationSettings()[0]?.model).toBe("model-small");
+  });
+
+  it("is a plain option for a conversation that is loaded, too", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const conversationId = harness.fake.addConversation(projectId, {
+      title: "Fold of GFP",
+      updatedAt: "2026-11-02T10:00:00Z",
+      model: "model-small",
+      effort: "low",
+    });
+
+    const loaded = await harness.withClient(
+      (context) =>
+        context.request(methods.agent.session.load, {
+          sessionId: conversationId,
+          cwd: folder,
+          mcpServers: [],
+        }),
+      { clientName: "t3-code" },
+    );
+
+    expect(summary(loaded?.configOptions)[0]).toMatchObject({
+      id: "model",
+      category: undefined,
+      current: "model-small",
+    });
+  });
+});

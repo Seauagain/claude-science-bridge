@@ -24,12 +24,16 @@ All notable changes to this project are recorded here. The format follows
   to the project of the folder's name, creating the project if there is none.
 - A session offers the daemon's models and effort levels as options; a loaded conversation
   shows its own. The `/open` command continues an existing conversation in a new thread.
+- For T3 Code the model is offered as an option like the effort, not as the session's model:
+  T3 Code refuses a change of model on a thread that has no session bound to it, such as a
+  settled or imported one, and accepts a change of options at any time.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
 - `csbridge t3-import <folder>` brings every project and conversation into T3 Code in one go: a
   linked sub-folder and a T3 project per project, and a thread per conversation that shows its
-  earlier messages, is on the conversation's model and is settled. Running it again brings in
-  only what is new. A thread that opens a conversation with `/open` settles itself in T3 Code.
+  earlier messages, carries the conversation's model and effort and is settled. Running it
+  again brings in only what is new. A thread that opens a conversation with `/open` gives
+  itself the conversation's model and effort and settles itself in T3 Code.
 - `csbridge doctor` to check the setup, and the same actionable messages when a session cannot be
   opened.
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;

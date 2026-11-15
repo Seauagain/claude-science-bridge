@@ -114,7 +114,7 @@ to get a `csbridge` command.
    ```
 
    Every project gets a linked sub-folder and a T3 project named `CS-<project>`, and every
-   conversation gets a thread on the conversation's own model. Each thread shows the earlier
+   conversation gets a thread that carries the conversation's own model and effort. Each thread shows the earlier
    messages and is already settled, so the import does not fill your list of finished work. Run
    the command again whenever you like: it brings in only what is new. `--prefix` changes the
    `CS-` in front of the project names, and `--provider` names the provider instance if yours
@@ -150,6 +150,11 @@ to get a `csbridge` command.
 - **Model and effort come from Claude Science.** The client's pickers show the models Claude
   Science offers and the effort levels each takes. A model can be changed at any time; the effort
   is taken when a conversation starts, because Claude Science keeps it for the conversation.
+- **In T3 Code the model is an option, next to the effort.** T3 Code lists one model, "Default",
+  for the agent and shows the Claude Science model among that model's options. T3 Code refuses
+  a change of a thread's model while no session is bound to the thread, which is the case for
+  every thread that was settled or only imported; a change of an option it accepts at any time.
+  Other clients get the model as the session's model, as ACP has it.
 - **Importing.** In T3 Code, `csbridge t3-import` brings in every project and conversation: see
   step 4 above. In any client, the conversations of the project a folder is linked to can also
   be imported by hand; in T3 Code that is "Native sessions" in the provider's settings.

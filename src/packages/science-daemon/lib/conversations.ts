@@ -9,8 +9,6 @@ export interface Conversation {
   readonly title: string;
   /** When the conversation last changed, as the daemon reports it: an ISO 8601 timestamp. */
   readonly updatedAt: string;
-  /** The model the conversation runs on. Absent when it was started without naming one. */
-  readonly model?: string;
 }
 
 /**
@@ -41,7 +39,6 @@ export async function listConversations(
         conversationId: expectString(frame, "id", call),
         title: expectString(frame, "name", call),
         updatedAt: expectString(frame, "updated_at", call),
-        ...(typeof frame.model === "string" && frame.model !== "" ? { model: frame.model } : {}),
       }))
   );
 }

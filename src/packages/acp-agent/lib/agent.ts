@@ -13,6 +13,7 @@ import {
   type ScienceDaemon,
   ScienceDaemonError,
 } from "../../science-daemon/index.ts";
+import { clientTraits } from "./client-traits.ts";
 import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
@@ -62,6 +63,8 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     return connection;
   };
   const projectOf = createFolderProjects(daemon);
+  // Known once the client has initialized, which it does before anything else.
+  let traits = clientTraits(undefined);
   // The models are asked for anew for each session: the daemon's list can change while this
   // process runs. A list csbridge cannot read costs the model and effort options, not the
   // session.
@@ -82,24 +85,29 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
   /** The part of a session's answer that tells the client its model and effort options. */
   const optionsOf = async (session: Session) => {
     const catalog = await models();
-    return catalog === undefined ? {} : { configOptions: settingsOptions(catalog, session) };
+    return catalog === undefined
+      ? {}
+      : { configOptions: settingsOptions(catalog, session, traits) };
   };
 
   return agent({ name: "claude-science-bridge" })
-    .onRequest(methods.agent.initialize, () => ({
-      protocolVersion: PROTOCOL_VERSION,
-      agentInfo: {
-        name: "claude-science-bridge",
-        title: "Claude Science",
-        version: options.version,
-      },
-      agentCapabilities: {
-        loadSession: true,
-        promptCapabilities: { image: false, audio: false, embeddedContext: false },
-        sessionCapabilities: { list: {} },
-      },
-      authMethods: [],
-    }))
+    .onRequest(methods.agent.initialize, ({ params }) => {
+      traits = clientTraits(params.clientInfo?.name);
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        agentInfo: {
+          name: "claude-science-bridge",
+          title: "Claude Science",
+          version: options.version,
+        },
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: false, audio: false, embeddedContext: false },
+          sessionCapabilities: { list: {} },
+        },
+        authMethods: [],
+      };
+    })
     .onRequest(methods.agent.session.new, async ({ params, client }) => {
       // Connect now, so that a setup problem is reported when the session is opened rather than
       // after the user has typed a prompt.
@@ -173,7 +181,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         throw new RequestError(INVALID_PARAMS, `This session has no option "${params.configId}".`);
       }
       chooseSetting(catalog, session, params.configId, params.value);
-      return { configOptions: settingsOptions(catalog, session) };
+      return { configOptions: settingsOptions(catalog, session, traits) };
     })
     .onRequest(methods.agent.session.prompt, ({ params, client }) => {
       const session = sessions.get(params.sessionId);
@@ -185,6 +193,8 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         record,
         // Every session asked for the models when it was set up; a prompt does not ask again.
         models: () => knownModels,
+        options: (current) =>
+          knownModels === undefined ? undefined : settingsOptions(knownModels, current, traits),
       });
     })
     .onNotification(methods.agent.session.cancel, ({ params }) => {

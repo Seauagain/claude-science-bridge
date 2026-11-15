@@ -70,21 +70,6 @@ function importInto(t3Cli: (args: readonly string[]) => Promise<string>, argv: s
 }
 
 describe("csbridge t3-import", () => {
-  it("starts a thread on the default model when the conversation's model is no longer offered", async () => {
-    const folding = fake.addProject("Protein folding");
-    fake.addConversation(folding, {
-      title: "Fold of GFP",
-      updatedAt: "2026-11-01T10:00:00Z",
-      model: "model-retired",
-    });
-    const t3 = t3StandIn();
-
-    const result = await importInto(t3.t3Cli);
-
-    expect(result.exitCode).toBe(0);
-    expect(t3.started().map((thread) => thread.model)).toEqual(["model-large"]);
-  });
-
   it("gives every project a linked folder and a T3 project, and every conversation a thread that opens it", async () => {
     const folding = fake.addProject("Protein folding");
     const climate = fake.addProject("Climate model");
@@ -108,20 +93,21 @@ describe("csbridge t3-import", () => {
       { title: "CS-Protein folding", folder: join(folder, "Protein folding") },
       { title: "CS-Climate model", folder: join(folder, "Climate model") },
     ]);
-    // Oldest first, so that the newest conversation ends up as the most recent thread. Each
-    // thread runs on the model its conversation has, or the daemon's default.
+    // Oldest first, so that the newest conversation ends up as the most recent thread. To T3
+    // Code the model is "default", its name for whatever the agent runs on: the opened
+    // conversation keeps its own model, which T3 Code shows among the thread's options.
     expect(t3.started()).toEqual([
       {
         title: "Fold of GFP",
         provider: "claudeScience",
-        model: "model-small",
+        model: "default",
         folder: join(folder, "Protein folding"),
         message: `/open ${older}`,
       },
       {
         title: "Beta barrels",
         provider: "claudeScience",
-        model: "model-large",
+        model: "default",
         folder: join(folder, "Protein folding"),
         message: `/open ${newer}`,
       },

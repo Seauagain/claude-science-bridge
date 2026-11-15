@@ -5,6 +5,7 @@ import {
   type PromptRequest,
   type PromptResponse,
   RequestError,
+  type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import {
   type ModelCatalog,
@@ -13,7 +14,7 @@ import {
   type TranscriptEntry,
   type Turn,
 } from "../../science-daemon/index.ts";
-import { settleClientThread } from "./client-thread.ts";
+import { arrangeClientThread } from "./client-thread.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
@@ -58,6 +59,11 @@ export interface PromptSurroundings {
    * cannot read. Read without a request, so that sending a prompt is not held up by it.
    */
   readonly models: () => ModelCatalog | undefined;
+  /**
+   * The options the client shows for a session as it now is, or nothing when the daemon's
+   * models cannot be read.
+   */
+  readonly options: (session: Session) => SessionConfigOption[] | undefined;
 }
 
 /**
@@ -154,9 +160,20 @@ async function openConversation(
   // On record, the conversation is this thread's: it is no longer offered for import, and
   // another adapter process can load the session.
   await surroundings.record.remember(request.sessionId, conversationId);
+  // The session now has the conversation's model and effort, not the ones it was opened with.
+  const configOptions = surroundings.options(session);
+  if (configOptions !== undefined) {
+    await surroundings.client.notify(methods.client.session.update, {
+      sessionId: request.sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions },
+    });
+  }
   const response = await showTranscript(transcript, request, surroundings);
-  // A conversation that was only brought in is not work that has just finished.
-  await settleClientThread(session.clientServers);
+  const catalog = surroundings.models();
+  await arrangeClientThread(
+    session.clientServers,
+    catalog === undefined ? {} : settingsInForce(catalog, session),
+  );
   return response;
 }
 

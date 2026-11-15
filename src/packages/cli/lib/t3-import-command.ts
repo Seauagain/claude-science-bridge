@@ -5,7 +5,6 @@ import { projectFolderNames } from "../../folder-names/index.ts";
 import {
   type Conversation,
   connectScienceDaemon,
-  type ModelCatalog,
   type Project,
   type ScienceDaemon,
 } from "../../science-daemon/index.ts";
@@ -47,7 +46,6 @@ export async function runT3ImportCommand(args: readonly string[], io: CommandIo)
 
     daemon = await connectScienceDaemon(daemonSetup(io));
     const projects = await daemon.listProjects();
-    const models = await daemon.listModels();
     let failures = 0;
     for (const { project, folderName } of projectFolderNames(projects)) {
       const folder = join(parent, folderName);
@@ -59,11 +57,7 @@ export async function runT3ImportCommand(args: readonly string[], io: CommandIo)
         continue;
       }
       await addProject(t3, title, folder);
-      const tally = await bringIn(
-        { t3, daemon, io, provider: wanted.provider, models },
-        project,
-        folder,
-      );
+      const tally = await bringIn({ t3, daemon, io, provider: wanted.provider }, project, folder);
       failures += tally.failed;
       io.stdout.write(`${title}: ${summary(tally)}\n`);
     }
@@ -88,7 +82,6 @@ async function bringIn(
     daemon: ScienceDaemon;
     io: CommandIo;
     provider: string;
-    models: ModelCatalog;
   },
   project: Project,
   folder: string,
@@ -106,7 +99,7 @@ async function bringIn(
   // Oldest first, so that the newest conversation ends up as the most recent thread.
   for (const conversation of [...missing].reverse()) {
     try {
-      await t3(startThread(conversation, folder, context.provider, context.models));
+      await t3(startThread(conversation, folder, context.provider));
       tally.broughtIn++;
     } catch (error) {
       tally.failed++;
@@ -117,16 +110,13 @@ async function bringIn(
 }
 
 /**
- * The `t3` arguments that start a thread opening `conversation`. The thread is on the
- * conversation's model, or on the default one when that model is not offered any more.
+ * T3 Code's name for "whatever model the agent runs on". The opened conversation keeps its own
+ * model, and T3 Code shows that among the thread's options, where it can always be changed.
  */
-function startThread(
-  conversation: Conversation,
-  folder: string,
-  provider: string,
-  models: ModelCatalog,
-): string[] {
-  const offered = models.models.some((model) => model.id === conversation.model);
+const AGENTS_OWN_MODEL = "default";
+
+/** The `t3` arguments that start a thread opening `conversation`. */
+function startThread(conversation: Conversation, folder: string, provider: string): string[] {
   return [
     "thread",
     "start",
@@ -135,7 +125,7 @@ function startThread(
     "--provider",
     provider,
     "--model",
-    offered && conversation.model !== undefined ? conversation.model : models.defaultModelId,
+    AGENTS_OWN_MODEL,
     "--title",
     conversation.title,
     folder,
