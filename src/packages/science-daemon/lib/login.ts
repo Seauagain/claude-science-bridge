@@ -4,6 +4,8 @@ import { runScienceCli, type ScienceCli } from "./science-cli.ts";
 
 /** The cookie pair the daemon issues for a login link. Kept in memory only, never logged. */
 export interface Login {
+  /** The cookies by name, kept so that a refreshed one can replace its predecessor. */
+  readonly cookies: ReadonlyMap<string, string>;
   /** Value for the `cookie` header of every request. */
   readonly cookieHeader: string;
   /** Value for the `x-operon-csrf` header of writes and for the socket subprotocol. */
@@ -44,7 +46,27 @@ export async function logIn(endpoint: DaemonEndpoint, scienceCli: ScienceCli): P
         "Check that `claude-science url` works in a terminal, then try again.",
     );
   }
-  return { cookieHeader: cookieHeader(cookies), csrfToken };
+  return { cookies, cookieHeader: cookieHeader(cookies), csrfToken };
+}
+
+/**
+ * Asks the daemon for a new CSRF token, which it wants once it calls the current one stale, and
+ * returns the login that carries it. See "Requests" in docs/protocol.md.
+ *
+ * The token is taken from the cookie the response sets. Without one the login comes back as it
+ * was, and the daemon's next answer says what is wrong.
+ */
+export async function refreshCsrfToken(endpoint: DaemonEndpoint, login: Login): Promise<Login> {
+  const cookies = new Map(login.cookies);
+  const response = await request(`${endpoint.baseUrl}/api/csrf`, {
+    headers: { cookie: login.cookieHeader },
+  });
+  collectCookies(response, cookies);
+  return {
+    cookies,
+    cookieHeader: cookieHeader(cookies),
+    csrfToken: cookies.get(CSRF_COOKIE) ?? login.csrfToken,
+  };
 }
 
 function extractNonce(cliOutput: string): string {

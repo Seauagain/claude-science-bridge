@@ -1,3 +1,4 @@
+import { DaemonAccess } from "./access.ts";
 import { parseDaemonStatus } from "./endpoint.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import { createDaemonHttp } from "./http.ts";
@@ -41,7 +42,7 @@ export async function checkDaemonSetup(scienceCli: ScienceCli): Promise<SetupChe
     );
 
     const login = await logIn(endpoint, scienceCli);
-    await createDaemonHttp(endpoint, login).get("/me");
+    await createDaemonHttp(new DaemonAccess(scienceCli, endpoint, login)).get("/me");
     checks.push({ name: "Login", status: "pass", message: "the daemon accepted a login link" });
   } catch (error) {
     if (!(error instanceof ScienceDaemonError)) throw error;
