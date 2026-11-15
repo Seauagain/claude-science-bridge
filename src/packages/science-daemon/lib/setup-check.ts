@@ -45,6 +45,7 @@ export async function checkDaemonSetup(scienceCli: ScienceCli): Promise<SetupChe
     checks.push({ name: "Login", status: "pass", message: "the daemon accepted a login link" });
   } catch (error) {
     if (!(error instanceof ScienceDaemonError)) throw error;
+    // Every check before the one that threw has been recorded, so the count names the culprit.
     const [failed = "Login", ...notChecked] = CHECK_NAMES.slice(checks.length);
     checks.push({ name: failed, status: "failure", message: error.message });
     for (const name of notChecked) {
