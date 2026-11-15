@@ -104,11 +104,19 @@ function extractNonce(cliOutput: string): string {
   );
 }
 
-/** One request of the login, which the daemon gets `timeoutMs` to answer. */
+/**
+ * One request of the login, which the daemon gets `timeoutMs` to answer. The login uses the
+ * status and the headers of the response only, so the body is released here: one that nobody
+ * reads keeps its connection occupied until the response is garbage collected.
+ */
 function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   return withinTimeLimit(
     timeoutMs,
-    (signal) => fetch(url, { ...init, redirect: "manual", signal }),
+    async (signal) => {
+      const response = await fetch(url, { ...init, redirect: "manual", signal });
+      await response.body?.cancel();
+      return response;
+    },
     " to log in",
   );
 }
