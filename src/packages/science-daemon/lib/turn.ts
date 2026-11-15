@@ -1,6 +1,7 @@
 import { AsyncQueue } from "./async-queue.ts";
 import type { ConversationState } from "./conversation-state.ts";
 import type { DaemonEvent, SocketSignal } from "./socket.ts";
+import type { ConnectionTiming } from "./timing.ts";
 
 /** How a turn ended. */
 export type TurnOutcome =
@@ -29,15 +30,28 @@ export interface Turn {
    * text is never repeated, and text that was streamed in the meantime arrives late, at the
    * latest when the turn ends. Iteration fails with a ScienceDaemonError when the connection
    * cannot be reopened.
+   *
+   * Once the caller has aborted the `cancel` signal the message was sent with, the daemon is
+   * asked to stop the reply, and the only event still to come is the end of the turn, with
+   * outcome `cancelled`. It comes when the daemon reports the end, at once when the daemon
+   * cannot be asked, and otherwise when the connection's `cancelTimeoutMs` has passed. That
+   * holds however the turn really ended, a failure included, and it holds for a reply that was
+   * complete before the daemon could stop it: the caller stopped listening to it all the same.
+   * Iteration no longer fails.
    */
   readonly events: AsyncIterable<TurnEvent>;
-  /**
-   * Asks the daemon to stop the reply. The turn then ends with outcome `cancelled`, unless it
-   * ended some other way first. Does nothing once the turn has ended.
-   *
-   * Returns at once. If the daemon cannot be asked, `events` fails with a ScienceDaemonError.
-   */
-  cancel(): void;
+}
+
+/** What a {@link TurnTracker} needs from the connection its turn runs on. */
+export interface TurnConnection {
+  /** Runs once, when the turn ends or its consumer stops listening. */
+  release(): void;
+  /** Reads where the conversation stands. Called only after events were missed. */
+  readState(): Promise<ConversationState>;
+  /** Asks the daemon to stop the turn. */
+  requestCancel(): Promise<unknown>;
+  /** See {@link ConnectionTiming.cancelTimeoutMs}. */
+  readonly cancelTimeoutMs: number;
 }
 
 /** Frame statuses that end a turn. See "REST endpoints used" in docs/protocol.md. */
@@ -62,7 +76,7 @@ export class TurnTracker {
   readonly events: AsyncIterable<TurnEvent>;
   readonly #conversationId: string;
   readonly #queue: AsyncQueue<TurnEvent>;
-  readonly #readState: () => Promise<ConversationState>;
+  readonly #connection: TurnConnection;
   /**
    * A status that ends a turn counts only after `processing` was seen: the daemon re-sends the
    * previous turn's final status, sometimes just before the next turn starts.
@@ -79,25 +93,22 @@ export class TurnTracker {
   #eventsMissed = false;
   /** The reads of the conversation's state, one at a time and in order. */
   #catchingUp: Promise<void> = Promise.resolve();
+  /** Runs out when a cancelled turn has waited long enough for the daemon to end it. */
+  #cancelDeadline: NodeJS.Timeout | undefined;
 
-  /**
-   * `release` runs once, when the turn ends or its consumer stops listening. `readState` reads
-   * where the conversation stands; it is called only after events were missed.
-   */
-  constructor(
-    conversationId: string,
-    release: () => void,
-    readState: () => Promise<ConversationState>,
-  ) {
+  /** Aborting `cancel` stops the turn. It may be aborted already. */
+  constructor(conversationId: string, cancel: AbortSignal, connection: TurnConnection) {
     this.#conversationId = conversationId;
-    this.#queue = new AsyncQueue(release);
-    this.#readState = readState;
-    this.events = this.#queue;
-  }
-
-  /** Whether the daemon has reported the end of the turn. */
-  get ended(): boolean {
-    return this.#ended;
+    this.#connection = connection;
+    const stop = () => this.#stop();
+    this.#queue = new AsyncQueue(() => {
+      cancel.removeEventListener("abort", stop);
+      clearTimeout(this.#cancelDeadline);
+      connection.release();
+    });
+    this.events = this.#eventsUntilCancelled(cancel);
+    if (cancel.aborted) stop();
+    else cancel.addEventListener("abort", stop, { once: true });
   }
 
   /** Ends the turn's events with `error`. Does nothing once the turn has ended. */
@@ -123,11 +134,15 @@ export class TurnTracker {
     if (event.frame_id !== this.#conversationId) return;
 
     if (event.type === "text_chunk") {
+      // Reasoning text (`block_type: "thinking"`) is not part of the reply.
       const streamed = event.block_type === "text" && typeof event.chunk === "string";
       if (streamed && !this.#eventsMissed) this.#deliver(String(event.chunk));
     } else if (event.type === "frame_update") {
       this.#acceptStatus(event);
     }
+    // `text_reset` is left unhandled on purpose. It tells a client to discard the text streamed
+    // so far because the reply starts over, and the consumer cannot do that: ACP has no way to
+    // take back text the client has been sent. The restarted reply follows what was delivered.
   }
 
   #acceptStatus(event: DaemonEvent): void {
@@ -148,12 +163,41 @@ export class TurnTracker {
     this.#catchingUp = this.#catchingUp
       .then(async () => {
         if (this.#ended) return;
-        const state = await this.#readState();
+        const state = await this.#connection.readState();
         this.#deliver(undeliveredText(this.#delivered, state.replyText));
         const outcome = OUTCOME_BY_STATUS[state.status];
         if (outcome !== undefined) this.#end(outcome, state.statusDescription);
       })
       .catch((error: unknown) => this.fail(error));
+  }
+
+  /**
+   * The turn's events as its consumer gets them: all of them until `cancel` is aborted, and
+   * from then on only the turn's end, as `cancelled`. See {@link Turn.events}.
+   */
+  async *#eventsUntilCancelled(cancel: AbortSignal): AsyncGenerator<TurnEvent> {
+    const cancelled: TurnEvent = { type: "ended", outcome: "cancelled" };
+    try {
+      for await (const event of this.#queue) {
+        if (!cancel.aborted) yield event;
+        else if (event.type === "ended") yield cancelled;
+      }
+    } catch (error) {
+      if (!cancel.aborted) throw error;
+      yield cancelled;
+    }
+  }
+
+  /** Asks the daemon to stop the turn, because the caller cancelled it. */
+  #stop(): void {
+    const endAsCancelled = () => this.#end("cancelled", undefined);
+    // The daemon confirms through the turn's events. A caller that cancelled must not wait for
+    // that without limit: the daemon may take the request and never end the turn, or never
+    // answer the request at all.
+    this.#cancelDeadline = setTimeout(endAsCancelled, this.#connection.cancelTimeoutMs);
+    // When the daemon cannot even be asked, the turn is over for the caller all the same, who
+    // asked for exactly that: the failure is not reported.
+    this.#connection.requestCancel().catch(endAsCancelled);
   }
 
   #deliver(text: string): void {

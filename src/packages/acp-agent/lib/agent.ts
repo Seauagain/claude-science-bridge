@@ -7,7 +7,7 @@ import {
   RequestError,
 } from "@agentclientprotocol/sdk";
 import { findProjectLink, ProjectLinkError } from "../../project-link/index.ts";
-import { type ScienceDaemon, ScienceDaemonError, type Turn } from "../../science-daemon/index.ts";
+import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
 import { promptText } from "./prompt-text.ts";
 
 /** What {@link createScienceAgent} needs. */
@@ -26,16 +26,11 @@ interface Session {
   readonly projectId: string;
   /** Set by the first prompt, which creates the conversation. */
   conversationId?: string;
-  /** The prompt being answered, if any. A session takes one prompt at a time. */
-  activePrompt?: ActivePrompt;
-}
-
-/** A prompt whose turn has not ended yet. */
-interface ActivePrompt {
-  /** Set by `session/cancel`. From then on none of the turn's updates are sent to the client. */
-  cancelRequested: boolean;
-  /** Known once the daemon has accepted the message. */
-  turn?: Turn;
+  /**
+   * Cancels the prompt being answered, if any. A session takes one prompt at a time. Aborted by
+   * `session/cancel`; from then on none of the turn's updates are sent to the client.
+   */
+  activePrompt?: AbortController;
 }
 
 const INVALID_REQUEST = -32600;
@@ -101,22 +96,18 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         );
       }
 
-      const active: ActivePrompt = { cancelRequested: false };
-      session.activePrompt = active;
+      const cancel = new AbortController();
+      session.activePrompt = cancel;
       try {
         const message = promptText(params.prompt);
         const science = await daemon();
         const turn =
           session.conversationId === undefined
-            ? await science.startConversation(session.projectId, message)
-            : await science.sendMessage(session.conversationId, message);
+            ? await science.startConversation(session.projectId, message, cancel.signal)
+            : await science.sendMessage(session.conversationId, message, cancel.signal);
         session.conversationId = turn.conversationId;
-        active.turn = turn;
-        // The client may have cancelled while the message was on its way to the daemon.
-        if (active.cancelRequested) turn.cancel();
+        // Once the client has cancelled, the turn has no more reply text and ends as cancelled.
         for await (const event of turn.events) {
-          // Once the client has cancelled, it gets no further updates for the turn.
-          if (event.type === "reply-text" && active.cancelRequested) continue;
           if (event.type === "reply-text") {
             await client.notify(methods.client.session.update, {
               sessionId: params.sessionId,
@@ -131,10 +122,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
               `Claude Science could not finish the reply: ${event.detail ?? "no reason given"}`,
             );
           } else {
-            // A reply that finished before the daemon could stop it was still cut short for the
-            // client, which stopped receiving it when it cancelled.
-            const cancelled = active.cancelRequested || event.outcome === "cancelled";
-            return { stopReason: cancelled ? "cancelled" : "end_turn" };
+            return { stopReason: event.outcome === "cancelled" ? "cancelled" : "end_turn" };
           }
         }
         throw new RequestError(
@@ -142,17 +130,16 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
           "The connection to Claude Science closed mid-reply.",
         );
       } catch (error) {
+        // ACP wants a cancelled prompt answered as cancelled, whatever went wrong afterwards.
+        if (cancel.signal.aborted) return { stopReason: "cancelled" };
         return rethrowAsRequestError(error);
       } finally {
         delete session.activePrompt;
       }
     })
     .onNotification(methods.agent.session.cancel, ({ params }) => {
-      const active = sessions.get(params.sessionId)?.activePrompt;
-      // Nothing to do when no turn is running or this one is being cancelled already.
-      if (active === undefined || active.cancelRequested) return;
-      active.cancelRequested = true;
-      active.turn?.cancel();
+      // Nothing happens when no prompt is being answered or this one is cancelled already.
+      sessions.get(params.sessionId)?.activePrompt?.abort();
     });
 }
 

@@ -11,7 +11,9 @@ export type ScienceDaemonErrorKind =
   /** The daemon answered a request with an error. */
   | "rejected"
   /** The daemon answered, but not in the shape this version understands. */
-  | "unexpected-response";
+  | "unexpected-response"
+  /** The caller cancelled a message before it was sent. Nothing went wrong. */
+  | "cancelled";
 
 /** Any failure of the `science-daemon` package. The message is safe to show to the user. */
 export class ScienceDaemonError extends Error {

@@ -21,6 +21,8 @@ export function newLoginRejected(): ScienceDaemonError {
  * of them.
  */
 export class DaemonAccess {
+  /** How long the daemon may take to answer a single request, in milliseconds. */
+  readonly requestTimeoutMs: number;
   readonly #scienceCli: ScienceCli;
   readonly #startCommand: string | undefined;
   #endpoint: DaemonEndpoint;
@@ -32,8 +34,10 @@ export class DaemonAccess {
     scienceCli: ScienceCli,
     endpoint: DaemonEndpoint,
     login: Login,
+    requestTimeoutMs: number,
     startCommand?: string,
   ) {
+    this.requestTimeoutMs = requestTimeoutMs;
     this.#scienceCli = scienceCli;
     this.#startCommand = startCommand;
     this.#endpoint = endpoint;
@@ -63,7 +67,7 @@ export class DaemonAccess {
   renewLogin(rejected: Login): Promise<Login> {
     // Someone else was turned away with the same login first and has replaced it already.
     if (rejected !== this.#login) return Promise.resolve(this.#login);
-    this.#renewal ??= logIn(this.#endpoint, this.#scienceCli)
+    this.#renewal ??= logIn(this.#endpoint, this.#scienceCli, this.requestTimeoutMs)
       .then((login) => {
         this.#login = login;
         return login;
@@ -80,7 +84,7 @@ export class DaemonAccess {
    */
   async refreshCsrfToken(rejected: Login): Promise<Login> {
     if (rejected !== this.#login) return this.#login;
-    const refreshed = await refreshCsrfToken(this.#endpoint, rejected);
+    const refreshed = await refreshCsrfToken(this.#endpoint, rejected, this.requestTimeoutMs);
     // A whole new login made in the meantime is newer than a refreshed token on the old one.
     if (rejected === this.#login) this.#login = refreshed;
     return this.#login;

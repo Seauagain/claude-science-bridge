@@ -1,6 +1,7 @@
 import { type DaemonAccess, newLoginRejected } from "./access.ts";
 import { ScienceDaemonError } from "./errors.ts";
 import type { Login } from "./login.ts";
+import { withinTimeLimit } from "./time-limit.ts";
 import { isRecord, type JsonRecord } from "./validate.ts";
 
 /** Logged-in JSON requests against the daemon's `/api` routes. */
@@ -19,7 +20,7 @@ interface HttpAnswer {
 /**
  * Requests that recover by themselves from a login the daemon no longer accepts (one new login,
  * one retry) and from a CSRF token it calls stale (one new token, one retry). See "Requests" and
- * "Recovery" in docs/protocol.md.
+ * "Recovery" in docs/protocol.md. Every single request gets the time limit of `access`.
  */
 export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
   const exchange = async (
@@ -36,20 +37,15 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
       headers["x-operon-csrf"] = login.csrfToken;
       headers.origin = endpoint.origin;
     }
-    try {
+    return withinTimeLimit(access.requestTimeoutMs, async (signal) => {
       const response = await fetch(`${endpoint.baseUrl}/api${path}`, {
         method,
         headers,
+        signal,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       return { status: response.status, ok: response.ok, text: await response.text() };
-    } catch (cause) {
-      throw new ScienceDaemonError(
-        "unreachable",
-        "Could not reach Claude Science. Check that it is still running (`claude-science status`).",
-        { cause },
-      );
-    }
+    });
   };
 
   const send = async (method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> => {
