@@ -11,7 +11,11 @@ import type { CliIo } from "./run-cli.ts";
  */
 export async function runAcpCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
   const agent = createScienceAgent({
-    connectDaemon: () => connectScienceDaemon({ scienceCli: io.scienceCli }),
+    connectDaemon: () =>
+      connectScienceDaemon({
+        scienceCli: io.scienceCli,
+        onWarning: (message) => io.stderr.write(`csbridge: warning: ${message}\n`),
+      }),
     version: await readVersion(),
   });
   const stream = ndJsonStream(Writable.toWeb(io.stdout), Readable.toWeb(io.stdin));
