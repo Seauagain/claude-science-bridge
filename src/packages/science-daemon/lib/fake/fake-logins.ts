@@ -9,6 +9,25 @@ import { type Answer, parseCookies, readBody, sendJson } from "./http-exchange.t
 export class FakeLogins {
   readonly #nonces = new Set<string>();
   readonly #logins = new Set<string>();
+  /** CSRF tokens the daemon issued and still takes. */
+  readonly #csrfTokens = new Set<string>();
+  #issuedCount = 0;
+  #accepting = true;
+
+  /** How many logins have been issued so far. */
+  get issuedCount(): number {
+    return this.#issuedCount;
+  }
+
+  /** Forgets every login issued so far, as the daemon does when they expire. */
+  expire(): void {
+    this.#logins.clear();
+  }
+
+  /** While false, no login counts as logged in, not even one issued a moment ago. */
+  accept(accept: boolean): void {
+    this.#accepting = accept;
+  }
 
   /** The nonce of a new single-use login link. */
   issueNonce(): string {
@@ -17,10 +36,24 @@ export class FakeLogins {
     return nonce;
   }
 
+  /** Makes every CSRF token issued so far stale. */
+  expireCsrfTokens(): void {
+    this.#csrfTokens.clear();
+  }
+
   /** `GET /`: the confirmation page of a login link, which sets the CSRF cookie. */
   servePage(response: ServerResponse): void {
-    response.setHeader("set-cookie", `operon_csrf=${randomBytes(16).toString("hex")}; Path=/`);
+    this.#setCsrfCookie(response);
     response.writeHead(200, { "content-type": "text/html" }).end("<form></form>");
+  }
+
+  /**
+   * `GET /api/csrf`: sets a new CSRF cookie. docs/protocol.md does not say what the body is; the
+   * fake sends an empty object.
+   */
+  refreshCsrfToken(response: ServerResponse): void {
+    this.#setCsrfCookie(response);
+    sendJson(response, 200, {});
   }
 
   /** `POST /api/auth/nonce`: exchanges an unused nonce for the login cookie. */
@@ -31,6 +64,7 @@ export class FakeLogins {
     }
     const login = randomBytes(16).toString("hex");
     this.#logins.add(login);
+    this.#issuedCount += 1;
     response.setHeader("set-cookie", `operon_auth=${login}; Path=/; HttpOnly`);
     sendJson(response, 200, { ok: true });
   }
@@ -46,8 +80,13 @@ export class FakeLogins {
       token !== undefined &&
       request.headers["x-operon-csrf"] === token &&
       request.headers.origin === origin;
-    if (valid) return undefined;
-    return { status: 403, body: { detail: "CSRF check failed", code: "csrf_invalid" } };
+    if (!valid) {
+      return { status: 403, body: { detail: "CSRF check failed", code: "csrf_invalid" } };
+    }
+    if (!this.#csrfTokens.has(token)) {
+      return { status: 403, body: { detail: "CSRF token stale", code: "csrf_stale" } };
+    }
+    return undefined;
   }
 
   /** Whether a handshake for the event socket carries what "WebSocket" in protocol.md asks for. */
@@ -62,7 +101,13 @@ export class FakeLogins {
     );
   }
 
+  #setCsrfCookie(response: ServerResponse): void {
+    const token = randomBytes(16).toString("hex");
+    this.#csrfTokens.add(token);
+    response.setHeader("set-cookie", `operon_csrf=${token}; Path=/`);
+  }
+
   #isLoggedIn(cookies: Map<string, string>): boolean {
-    return this.#logins.has(cookies.get("operon_auth") ?? "");
+    return this.#accepting && this.#logins.has(cookies.get("operon_auth") ?? "");
   }
 }

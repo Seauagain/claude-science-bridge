@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DaemonAccess } from "./access.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
@@ -59,7 +60,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   const versionWarning = untestedVersionWarning(endpoint.version);
   if (versionWarning !== undefined) options.onWarning?.(versionWarning);
   const login = await logIn(endpoint, options.scienceCli);
-  const http = createDaemonHttp(endpoint, login);
+  const http = createDaemonHttp(new DaemonAccess(options.scienceCli, endpoint, login));
   const me = expectRecord(await http.get("/me"), "GET /me");
   const socket = await openDaemonSocket(endpoint, login, expectString(me, "user_id", "GET /me"));
 

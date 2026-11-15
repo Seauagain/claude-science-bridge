@@ -26,6 +26,23 @@ export interface FakeScienceDaemon {
    * instead of the usual response, as a daemon version with a different interface would.
    */
   respondOnce(route: string, body: unknown): void;
+  /**
+   * Makes every login issued so far expire: requests that carry one are answered 401 and new
+   * socket handshakes are refused. Sockets that are already open stay open.
+   */
+  expireLogins(): void;
+  /**
+   * While false, the daemon treats every request as not logged in, even one that carries a login
+   * it issued a moment ago. It accepts logins by default.
+   */
+  acceptLogins(accept: boolean): void;
+  /** How many logins the daemon has issued, each in exchange for a login link. */
+  loginCount(): number;
+  /**
+   * Makes every CSRF token issued so far stale: a write that carries one is answered 403 with
+   * `code: "csrf_stale"` until the client has fetched a new token from `GET /api/csrf`.
+   */
+  expireCsrfTokens(): void;
   /** Creates a project, archived if asked, and returns its identifier. */
   addProject(name: string, options?: { readonly archived?: boolean }): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
@@ -110,6 +127,22 @@ class FakeDaemon implements FakeScienceDaemon {
     this.#responseOverrides.set(route, body);
   }
 
+  expireLogins(): void {
+    this.#logins.expire();
+  }
+
+  acceptLogins(accept: boolean): void {
+    this.#logins.accept(accept);
+  }
+
+  loginCount(): number {
+    return this.#logins.issuedCount;
+  }
+
+  expireCsrfTokens(): void {
+    this.#logins.expireCsrfTokens();
+  }
+
   addProject(name: string, options: { readonly archived?: boolean } = {}): string {
     const projectId = `proj_${randomBytes(6).toString("hex")}`;
     this.#projects.set(projectId, { name, archivedAt: options.archived ? TIMESTAMP : null });
@@ -154,10 +187,11 @@ class FakeDaemon implements FakeScienceDaemon {
     if (route === "GET /") return this.#logins.servePage(response);
     if (route === "POST /api/auth/nonce") return this.#logins.exchangeNonce(request, response);
 
-    const answer =
-      this.#logins.refusal(request, this.#origin) ??
-      this.#override(route) ??
-      (await this.#answer(route, url, request));
+    const refusal = this.#logins.refusal(request, this.#origin);
+    if (refusal === undefined && route === "GET /api/csrf") {
+      return this.#logins.refreshCsrfToken(response);
+    }
+    const answer = refusal ?? this.#override(route) ?? (await this.#answer(route, url, request));
     sendJson(response, answer.status, answer.body);
   }
 
