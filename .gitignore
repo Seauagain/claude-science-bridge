@@ -34,3 +34,7 @@ exports/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Tool output
+coverage/
+.vitest/

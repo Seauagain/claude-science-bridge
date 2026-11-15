@@ -26,19 +26,19 @@ This project aims to close both gaps:
 
 ## Planned components
 
-| Component | What it does |
-|---|---|
+| Component | What it does                                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `adapter` | ACP agent over stdio. Signs in to the local daemon, creates conversations, sends prompts, translates streamed events into ACP updates, maps approval cards to ACP permission requests, supports cancel. |
-| `export` | Read-only, one-way sync from the Claude Science data directory to a plain folder tree: one folder per project, conversations as Markdown, artifacts under their original file names. |
-| `mapping` | One local folder per Claude Science project, so a directory-based client shows the same "project → conversation" structure in its sidebar. |
+| `export`  | Read-only, one-way sync from the Claude Science data directory to a plain folder tree: one folder per project, conversations as Markdown, artifacts under their original file names.                    |
+| `mapping` | One local folder per Claude Science project, so a directory-based client shows the same "project → conversation" structure in its sidebar.                                                              |
 
 ## Design notes
 
 - The daemon listens on localhost and requires a session. The adapter obtains one the same way
   the browser does: it asks the `claude-science` CLI for a single-use login link and exchanges it.
 - The daemon's HTTP and WebSocket interface is internal and undocumented. It can change with any
-  Claude Science update, so the adapter will pin the versions it has been tested against and fail
-  loudly on anything else.
+  Claude Science update, so the adapter tracks the versions it has been tested against, warns on
+  anything else, and fails with a clear error when a response does not have the expected shape.
 - The exporter only ever opens the database read-only and never writes into the Claude Science
   data directory.
 - Credentials, tokens and keys are never read, logged or exported.

@@ -1,0 +1,41 @@
+{
+  "name": "claude-science-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Unofficial bridge for Claude Science: an ACP adapter for agent UIs, plus a plain-file exporter.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.13.1",
+  "bin": {
+    "csbridge": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "lint:boundaries": "depcruise src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm lint:boundaries && pnpm test:coverage",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^2.6.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.7",
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "@vitest/coverage-v8": "^5.1.0",
+    "dependency-cruiser": "^18.7.2",
+    "typescript": "^6.0.3",
+    "vitest": "^5.1.0"
+  }
+}
