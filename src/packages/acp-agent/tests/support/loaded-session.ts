@@ -25,7 +25,10 @@ export async function loadSession(
   const seenBefore = harness.updates(sessionId).length;
   await context.request(methods.agent.session.load, { sessionId, cwd: folder, mcpServers: [] });
   // Taken the moment the load is answered: the history has to be there by then.
-  const history = harness.updates(sessionId).slice(seenBefore);
+  const history = harness
+    .updates(sessionId)
+    .slice(seenBefore)
+    .filter((update) => update.sessionUpdate !== "available_commands_update");
 
   return {
     sessionId,

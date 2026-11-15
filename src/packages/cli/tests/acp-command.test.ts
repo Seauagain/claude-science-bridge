@@ -79,6 +79,7 @@ describe("csbridge acp with a daemon version it was not tested with", () => {
     const messages = output.stdout.trimEnd().split("\n");
     expect(messages.map((line) => JSON.parse(line))).toEqual([
       expect.objectContaining({ id: 1, result: expect.anything() }),
+      expect.objectContaining({ method: "session/update" }),
       expect.objectContaining({ id: 2, result: { sessionId: expect.any(String) } }),
     ]);
   });

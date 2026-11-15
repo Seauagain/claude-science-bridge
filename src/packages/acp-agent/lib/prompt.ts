@@ -8,6 +8,7 @@ import {
 import type { ScienceDaemon, Turn } from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FolderProjects } from "./folder-project.ts";
+import { HISTORY_COMMAND, historyText } from "./history.ts";
 import { promptText } from "./prompt-text.ts";
 import type { SessionRecord } from "./session-record.ts";
 
@@ -57,6 +58,10 @@ export async function answerPrompt(
     );
   }
 
+  if (promptText(request.prompt).trim() === `/${HISTORY_COMMAND.name}`) {
+    return showHistory(session, request, surroundings).catch(rethrowAsRequestError);
+  }
+
   const cancel = new AbortController();
   session.activePrompt = cancel;
   try {
@@ -88,6 +93,29 @@ export async function answerPrompt(
   } finally {
     delete session.activePrompt;
   }
+}
+
+/**
+ * Answers the history command: shows the conversation's earlier messages as reply text. Nothing
+ * is sent to Claude Science, so this costs the user nothing.
+ */
+async function showHistory(
+  session: Session,
+  request: PromptRequest,
+  { client, daemon }: PromptSurroundings,
+): Promise<PromptResponse> {
+  const transcript =
+    session.conversationId === undefined
+      ? []
+      : await (await daemon()).readTranscript(session.conversationId);
+  const pieces = historyText(transcript);
+  for (const text of pieces.length === 0 ? ["This thread has no earlier messages."] : pieces) {
+    await client.notify(methods.client.session.update, {
+      sessionId: request.sessionId,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+    });
+  }
+  return { stopReason: "end_turn" };
 }
 
 /** Sends a message to the session's conversation, starting the conversation if there is none. */

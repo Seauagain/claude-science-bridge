@@ -108,7 +108,10 @@ describe("the first prompt of a session whose folder is not linked to a project"
       const session = await context.buildSession(folder).start();
       await runTurn(session, "What is the fold of GFP?");
       await runTurn(session, "How many strands?");
-      return harness.updates(session.sessionId);
+      // What a session offers when it opens is another matter: see history-command.test.ts.
+      return harness
+        .updates(session.sessionId)
+        .filter((update) => update.sessionUpdate !== "available_commands_update");
     });
 
     expect(updates).toEqual([

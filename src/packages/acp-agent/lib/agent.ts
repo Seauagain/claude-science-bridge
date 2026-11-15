@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AgentApp,
+  type AgentContext,
   agent,
   methods,
   PROTOCOL_VERSION,
@@ -10,7 +11,7 @@ import { findProjectLink } from "../../project-link/index.ts";
 import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
 import { rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
-import { historyUpdates } from "./history.ts";
+import { HISTORY_COMMAND, historyUpdates } from "./history.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
 
@@ -71,12 +72,13 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       },
       authMethods: [],
     }))
-    .onRequest(methods.agent.session.new, async ({ params }) => {
+    .onRequest(methods.agent.session.new, async ({ params, client }) => {
       // Connect now, so that a setup problem is reported when the session is opened rather than
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
       sessions.set(sessionId, { cwd: params.cwd });
+      await offerCommands(client, sessionId);
       return { sessionId };
     })
     .onRequest(methods.agent.session.list, async ({ params }) => {
@@ -117,6 +119,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         }
         // A session this process is serving already keeps its state, such as a running prompt.
         if (!sessions.has(sessionId)) sessions.set(sessionId, { cwd: params.cwd, conversationId });
+        await offerCommands(client, sessionId);
         return {};
       } catch (error) {
         if (error instanceof ScienceDaemonError && error.kind === "not-found") {
@@ -134,4 +137,15 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       // Nothing happens when no prompt is being answered or this one is cancelled already.
       sessions.get(params.sessionId)?.activePrompt?.abort();
     });
+}
+
+/**
+ * Tells the client which commands the session takes. Sent before the session is answered: a
+ * client reads a session's commands while it is being set up.
+ */
+async function offerCommands(client: AgentContext, sessionId: string): Promise<void> {
+  await client.notify(methods.client.session.update, {
+    sessionId,
+    update: { sessionUpdate: "available_commands_update", availableCommands: [HISTORY_COMMAND] },
+  });
 }
