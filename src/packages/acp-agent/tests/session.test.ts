@@ -1,5 +1,6 @@
 import { methods, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { findProjectLink } from "../../project-link/index.ts";
 import { type Harness, startHarness } from "./support/harness.ts";
 
 let harness: Harness;
@@ -46,8 +47,8 @@ describe("opening a session", () => {
     expect(sessionId).not.toBe("");
   });
 
-  it("opens a session in a folder that is not linked to a project", async () => {
-    const folder = await harness.unlinkedFolder();
+  it("opens a session in a folder that is not linked to a project, and leaves it unlinked", async () => {
+    const folder = await harness.unlinkedFolder("Kinase screen");
 
     const sessionId = await harness.withClient(async (context) => {
       const session = await context.buildSession(folder).start();
@@ -55,6 +56,8 @@ describe("opening a session", () => {
     });
 
     expect(sessionId).not.toBe("");
+    expect(await findProjectLink(folder)).toBeUndefined();
+    expect(harness.fake.projects()).toEqual([]);
   });
 
   it("does not start a conversation until a prompt is sent", async () => {

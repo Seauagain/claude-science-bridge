@@ -6,7 +6,7 @@ import { type Conversation, listConversations } from "./conversations.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
-import { listProjects, type Project } from "./projects.ts";
+import { createProject, listProjects, type Project } from "./projects.ts";
 import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonSocket, openDaemonSocket, type SocketSignal } from "./socket.ts";
 import { untestedVersionWarning } from "./tested-versions.ts";
@@ -30,6 +30,14 @@ export interface ScienceDaemon {
    * @throws ScienceDaemonError when the daemon cannot be reached or answers unexpectedly.
    */
   listProjects(): Promise<Project[]>;
+  /**
+   * Creates a project with the given name and returns it. The daemon does not keep names
+   * unique: a second project of the same name is created without complaint.
+   *
+   * @throws ScienceDaemonError when the daemon refuses, cannot be reached or answers
+   *   unexpectedly.
+   */
+  createProject(name: string): Promise<Project>;
   /**
    * Lists the conversations of a project that the user sees, newest first. Conversations the
    * daemon hides and the project's other frames, such as its uploads, are left out.
@@ -118,6 +126,10 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
     async listProjects() {
       await socket.ready();
       return listProjects(http);
+    },
+    async createProject(name) {
+      await socket.ready();
+      return createProject(http, name);
     },
     async listConversations(projectId) {
       await socket.ready();

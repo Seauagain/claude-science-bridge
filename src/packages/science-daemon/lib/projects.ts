@@ -19,10 +19,20 @@ export async function listProjects(http: DaemonHttp): Promise<Project[]> {
   return expectArray(response, "projects", call)
     .map((entry) => expectRecord(entry, call))
     .filter((project) => !isArchived(project))
-    .map((project) => ({
-      projectId: expectString(project, "project_id", call),
-      name: expectString(project, "name", call),
-    }));
+    .map((project) => projectOf(project, call));
+}
+
+/** Creates a project with the given name. See `POST /projects` in docs/protocol.md. */
+export async function createProject(http: DaemonHttp, name: string): Promise<Project> {
+  const call = "POST /projects";
+  return projectOf(expectRecord(await http.post("/projects", { name }), call), call);
+}
+
+function projectOf(project: JsonRecord, call: string): Project {
+  return {
+    projectId: expectString(project, "project_id", call),
+    name: expectString(project, "name", call),
+  };
 }
 
 /**

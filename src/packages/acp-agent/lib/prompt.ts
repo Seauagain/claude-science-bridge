@@ -5,15 +5,15 @@ import {
   type PromptResponse,
   RequestError,
 } from "@agentclientprotocol/sdk";
-import { findProjectLink } from "../../project-link/index.ts";
 import type { ScienceDaemon, Turn } from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
+import type { FolderProjects } from "./folder-project.ts";
 import { promptText } from "./prompt-text.ts";
 import type { SessionRecord } from "./session-record.ts";
 
 /** An ACP session: the client's handle on at most one conversation. */
 export interface Session {
-  /** The session's working folder. The project it is linked to gets the conversation. */
+  /** The session's working folder. Its project gets the conversation. */
   readonly cwd: string;
   /**
    * Set by the first prompt, which creates the conversation, or from the start for a session
@@ -33,6 +33,8 @@ export interface PromptSurroundings {
   readonly client: AgentContext;
   /** The connection to the daemon, made on first use. */
   readonly daemon: () => Promise<ScienceDaemon>;
+  /** Finds the project a new conversation of a working folder goes to. */
+  readonly projectOf: FolderProjects;
   /** Where a session's conversation is recorded once the first prompt has started it. */
   readonly record: SessionRecord;
 }
@@ -93,32 +95,26 @@ async function sendPrompt(
   session: Session,
   request: PromptRequest,
   cancel: AbortSignal,
-  { daemon, record }: PromptSurroundings,
+  { client, daemon, projectOf, record }: PromptSurroundings,
 ): Promise<Turn> {
   const message = promptText(request.prompt);
   if (session.conversationId !== undefined) {
     return (await daemon()).sendMessage(session.conversationId, message, cancel);
   }
-  const projectId = await linkedProjectId(session.cwd);
+  // The folder's project is settled now and not when the session is opened: a client opens
+  // sessions in folders of its own choosing just to find out what the agent can do, and those
+  // must not leave a project or a link behind.
+  const { projectId, note } = await projectOf(session.cwd);
+  if (note !== undefined) {
+    await client.notify(methods.client.session.update, {
+      sessionId: request.sessionId,
+      update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: note } },
+    });
+  }
   const turn = await (await daemon()).startConversation(projectId, message, cancel);
   session.conversationId = turn.conversationId;
   // From here on the session can be loaded by another adapter process. If this fails, so does
   // the prompt, although its turn runs on: the user has to learn that the thread will be lost.
   await record.remember(request.sessionId, turn.conversationId);
   return turn;
-}
-
-/**
- * The project a session's working folder is linked to. The link is looked up when the first
- * prompt arrives, not when the session is opened: a client opens sessions in folders of its
- * own choosing just to find out what the agent can do.
- */
-async function linkedProjectId(folder: string): Promise<string> {
-  const link = await findProjectLink(folder);
-  if (link !== undefined) return link.projectId;
-  throw new RequestError(
-    INVALID_REQUEST,
-    `${folder} is not linked to a Claude Science project. ` +
-      'Run "csbridge link --project <name>" in that folder, then send the prompt again.',
-  );
 }

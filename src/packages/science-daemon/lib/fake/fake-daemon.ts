@@ -1,25 +1,14 @@
-import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
-import {
-  type ExistingConversation,
-  type FakeConversation,
-  FakeConversations,
-  type ReplyScript,
-} from "./fake-conversations.ts";
+import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversation.ts";
+import { FakeConversations } from "./fake-conversations.ts";
 import { FakeEventSockets } from "./fake-event-sockets.ts";
 import { FakeLogins } from "./fake-logins.ts";
+import { type FakeProject, FakeProjects } from "./fake-projects.ts";
 import type { FakeScienceDaemon } from "./fake-science-daemon.ts";
 import { type Answer, readBody, sendJson, undocumented } from "./http-exchange.ts";
-import { TIMESTAMP } from "./stored-conversation.ts";
-
-interface Project {
-  readonly name: string;
-  /** When the project was archived, or null for a project in use. */
-  readonly archivedAt: string | null;
-}
 
 /** The daemon version docs/protocol.md was observed on. */
 const OBSERVED_VERSION = "0.1.53";
@@ -42,7 +31,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #logins = new FakeLogins();
   readonly #sockets = new FakeEventSockets();
   readonly #conversations = new FakeConversations((event) => this.#sockets.broadcast(event));
-  readonly #projects = new Map<string, Project>();
+  readonly #projects = new FakeProjects();
   readonly #responseOverrides = new Map<string, unknown>();
   /** Sockets whose handshake was left unanswered, kept so that stopping the daemon cuts them. */
   readonly #unansweredHandshakes = new Set<Duplex>();
@@ -112,9 +101,11 @@ class FakeDaemon implements FakeScienceDaemon {
   }
 
   addProject(name: string, options: { readonly archived?: boolean } = {}): string {
-    const projectId = `proj_${randomBytes(6).toString("hex")}`;
-    this.#projects.set(projectId, { name, archivedAt: options.archived ? TIMESTAMP : null });
-    return projectId;
+    return this.#projects.add(name, options.archived ?? false);
+  }
+
+  projects(): FakeProject[] {
+    return this.#projects.all();
   }
 
   addConversation(projectId: string, conversation: ExistingConversation): string {
@@ -216,7 +207,12 @@ class FakeDaemon implements FakeScienceDaemon {
   /** The routes of "REST endpoints used" in docs/protocol.md, for a logged-in request. */
   async #answer(route: string, url: URL, request: IncomingMessage): Promise<Answer> {
     if (route === "GET /api/me") return { status: 200, body: { user_id: "fake-user" } };
-    if (route === "GET /api/projects") return this.#listProjects();
+    if (route === "GET /api/projects") {
+      return this.#projects.list((projectId) => this.#conversations.countIn(projectId));
+    }
+    if (route === "POST /api/projects") {
+      return this.#projects.create(JSON.parse(await readBody(request)));
+    }
     if (route === "GET /api/frames") {
       // What the daemon answers for a project it does not know is not recorded.
       return this.#projects.has(url.searchParams.get("project_id") ?? "")
@@ -243,18 +239,6 @@ class FakeDaemon implements FakeScienceDaemon {
     }
     if (target === "POST frames/cancel") return this.#conversations.cancel(decodeURIComponent(id));
     return { status: 404, body: { detail: `Not found: ${route}` } };
-  }
-
-  #listProjects(): Answer {
-    const projects = [...this.#projects].map(([projectId, project]) => ({
-      project_id: projectId,
-      name: project.name,
-      description: "",
-      conversation_count: this.#conversations.countIn(projectId),
-      archived_at: project.archivedAt,
-      updated_at: TIMESTAMP,
-    }));
-    return { status: 200, body: { projects, total: projects.length } };
   }
 
   #upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
