@@ -20,6 +20,8 @@ statement below as an observation about one version, not a contract.
 
 - `claude-science status` prints JSON and always exits 0. Fields used: `running` (boolean),
   `version` (string), `port` (number). **[live]**
+- The `claude-science` executable of a default installation is `~/.claude-science/bin/claude-science`;
+  `~/.claude-science` is the daemon's data folder. **[live]**
 - The daemon listens on loopback. `GET /health` answers 200 without a login; every `/api/*`
   route answers 401 without one. **[live]**
 
@@ -116,6 +118,13 @@ requests are in `pending_input_requests`.
 | `rate_limit_notice`    | `root_frame_id`, ...                                                                                                                                                  | The reply is paused by a usage limit.                                                                                          | **[web]**  |
 
 ### Turn lifecycle
+
+Not handled: `text_reset`. ACP cannot take back text already sent to the client, so the adapter
+ignores it; after a reset the client shows the discarded text followed by the restarted reply.
+
+Where a failed turn's reason is reported is unknown. The adapter reads `status_description` from
+the `frame_update` that ends the turn (the field was seen live on `frame_update`, but never on a
+failed turn) and says "no reason given" without it. **[open]**
 
 Observed order for one turn of a conversation whose frame id is `R`, all **[live]**:
 
