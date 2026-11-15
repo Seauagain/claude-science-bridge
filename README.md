@@ -69,6 +69,11 @@ to get a `csbridge` command.
    This writes `.csbridge/project.json` in the folder. The project must already exist in Claude
    Science.
 
+   To mirror all your projects at once, run `csbridge link --all ~/science-projects` (the folder
+   must exist), then add the folders it lists as projects in your ACP client. Folder names are made
+   valid on macOS, Linux and Windows; projects with the same name get their identifier appended. A
+   folder that is already linked to a different project is skipped.
+
 3. Register the agent in your ACP client as a local command: the Node.js executable with the
    arguments `/path/to/claude-science-bridge/dist/main.js acp`. Then start a thread in the linked
    folder.
@@ -92,12 +97,13 @@ to get a `csbridge` command.
 
 ## Commands
 
-| Command                                         | What it does                                                                         |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `csbridge acp`                                  | Runs as an ACP agent on standard input and output. This is what the client launches. |
-| `csbridge projects`                             | Lists your Claude Science projects.                                                  |
-| `csbridge link --project <id or name> [folder]` | Links a folder (default: the current one) to a project.                              |
-| `csbridge doctor`                               | Checks the setup and says how to fix what is wrong.                                  |
+| Command                                         | What it does                                                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `csbridge acp`                                  | Runs as an ACP agent on standard input and output. This is what the client launches.                                                                               |
+| `csbridge projects`                             | Lists your Claude Science projects.                                                                                                                                |
+| `csbridge link --project <id or name> [folder]` | Links a folder (default: the current one) to a project.                                                                                                            |
+| `csbridge link --all <folder>`                  | Creates a sub-folder of `<folder>` for every project that is not archived, named after the project and linked to it. Run it again to add folders for new projects. |
+| `csbridge doctor`                               | Checks the setup and says how to fix what is wrong.                                                                                                                |
 
 | Setting                       | Meaning                                                                                                                                                                                           |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

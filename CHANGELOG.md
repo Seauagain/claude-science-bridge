@@ -16,6 +16,8 @@ All notable changes to this project are recorded here. The format follows
   reply interrupted by a drop is completed from the conversation's messages, and replies end with
   a clear error when the daemon stays away.
 - `csbridge projects` and `csbridge link` to link a folder to a Claude Science project.
+- `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
+  that are valid on macOS, Linux and Windows.
 - `csbridge doctor` to check the setup, and the same actionable messages when a session cannot be
   opened.
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;
