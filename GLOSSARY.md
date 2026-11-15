@@ -20,7 +20,11 @@ a sub-agent runs in a child frame.
 finishes, fails, is cancelled, or waits for the user.
 
 **Turn event**: one thing that happened during a turn, as reported by the `science-daemon`
-package: a piece of reply text, or the end of the turn with its outcome.
+package: a piece of reply text, input requests, or the end of the turn with its outcome.
+
+**Input request**: something the daemon asks the user before a turn can go on: an approval, for
+example of access to a folder, or a question. It has **choices**; the user's pick is the
+**answer**. _Avoid_: permission (ACP's word for one way of asking), prompt.
 
 **Session**: the ACP client's handle on a conversation. One session maps to at most one
 conversation. _Avoid_: using "session" for the login.

@@ -1,3 +1,4 @@
+import type { JsonRecord } from "../validate.ts";
 import type { StoredMessage } from "./stored-conversation.ts";
 
 /** A turn in progress on the fake daemon, handed to a {@link ReplyScript}. */
@@ -10,6 +11,14 @@ export interface FakeTurn {
   replyText(chunk: string): void;
   /** Streams one piece of reasoning text, which does not become part of the reply. */
   reasoningText(chunk: string): void;
+  /**
+   * Stops the turn to ask the user: the frame goes to `awaiting_user_response` with these input
+   * requests pending, each given as the fields the daemon has for its kind (`kind` and what
+   * belongs to it). Resolves with the responses once every request has been answered through
+   * `POST /frames/<id>/resolve-input`; the turn is then `processing` again and the script
+   * carries on.
+   */
+  ask(requests: readonly JsonRecord[]): Promise<JsonRecord[]>;
   /** Ends the turn successfully. */
   complete(): void;
   /** Ends the turn as failed, with the reason the daemon would report. */

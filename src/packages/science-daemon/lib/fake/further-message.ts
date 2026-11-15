@@ -5,6 +5,7 @@ export interface MessageTarget {
   readonly id: string;
   readonly agentName: string;
   readonly status: string;
+  readonly pendingRequests: readonly unknown[];
 }
 
 /** A `POST /request` the fake daemon accepts, or the error it answers with. */
@@ -36,6 +37,10 @@ export function readFurtherMessage<Target extends MessageTarget>(
   const conversation = conversations.find((candidate) => candidate.id === fields.root_frame_id);
   if (conversation === undefined) {
     return refusal(404, `Frame ${String(fields.root_frame_id)} not found`);
+  }
+
+  if (conversation.pendingRequests.length > 0) {
+    return refusal(400, "Please answer the pending question(s) before sending a new message.");
   }
 
   const text = isRecord(fields.input_data) ? fields.input_data.request : undefined;

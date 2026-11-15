@@ -6,6 +6,7 @@
 export { type ConnectOptions, connectScienceDaemon, type ScienceDaemon } from "./lib/connect.ts";
 export type { Conversation } from "./lib/conversations.ts";
 export { ScienceDaemonError, type ScienceDaemonErrorKind } from "./lib/errors.ts";
+export type { InputAnswer, InputChoice, InputRequest } from "./lib/input-requests.ts";
 export type { ConversationSettings, EffortLevel, Model, ModelCatalog } from "./lib/models.ts";
 export type { Project } from "./lib/projects.ts";
 export { createScienceCli, type ScienceCliOptions } from "./lib/real-science-cli.ts";

@@ -18,6 +18,7 @@ import { arrangeClientThread } from "./client-thread.ts";
 import { INTERNAL_ERROR, INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
+import { type AskingWay, askUser } from "./input-requests.ts";
 import { promptText } from "./prompt-text.ts";
 import type { SessionRecord } from "./session-record.ts";
 import { settingsInForce } from "./settings.ts";
@@ -64,6 +65,8 @@ export interface PromptSurroundings {
    * models cannot be read.
    */
   readonly options: (session: Session) => SessionConfigOption[] | undefined;
+  /** How this client is asked what the daemon asks the user. */
+  readonly askingWay: AskingWay;
 }
 
 /**
@@ -96,27 +99,23 @@ export async function answerPrompt(
   const cancel = new AbortController();
   session.activePrompt = cancel;
   try {
-    const turn = await sendPrompt(session, request, cancel.signal, surroundings);
-    // Once the client has cancelled, the turn has no more reply text and ends as cancelled.
-    for await (const event of turn.events) {
-      if (event.type === "reply-text") {
-        await client.notify(methods.client.session.update, {
-          sessionId: request.sessionId,
-          update: {
-            sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: event.text },
-          },
-        });
-      } else if (event.outcome === "failed") {
-        throw new RequestError(
-          INTERNAL_ERROR,
-          `Claude Science could not finish the reply: ${event.detail ?? "no reason given"}`,
-        );
-      } else {
-        return { stopReason: event.outcome === "cancelled" ? "cancelled" : "end_turn" };
-      }
+    // A conversation that is waiting for the user's approvals or answers takes no message
+    // until it has them, so they come first, and with them the rest of the turn that asked.
+    const waiting =
+      session.conversationId === undefined
+        ? undefined
+        : await (await surroundings.daemon()).waitingTurn(session.conversationId, cancel.signal);
+    if (waiting !== undefined) {
+      const stopped = await relayTurn(waiting, request, cancel.signal, surroundings);
+      if (stopped.stopReason !== "end_turn") return stopped;
+      // What follows is the reply to this prompt, not more of the turn that had asked.
+      await surroundings.client.notify(methods.client.session.update, {
+        sessionId: request.sessionId,
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "\n\n" } },
+      });
     }
-    throw new RequestError(INTERNAL_ERROR, "The connection to Claude Science closed mid-reply.");
+    const turn = await sendPrompt(session, request, cancel.signal, surroundings);
+    return await relayTurn(turn, request, cancel.signal, surroundings);
   } catch (error) {
     // ACP wants a cancelled prompt answered as cancelled, whatever went wrong afterwards.
     if (cancel.signal.aborted) return { stopReason: "cancelled" };
@@ -124,6 +123,47 @@ export async function answerPrompt(
   } finally {
     delete session.activePrompt;
   }
+}
+
+/**
+ * Passes a turn on to the client until it ends: the reply as text, and what the daemon asks
+ * the user as permission requests, whose answers go back to the daemon.
+ */
+async function relayTurn(
+  turn: Turn,
+  request: PromptRequest,
+  cancel: AbortSignal,
+  { client, daemon, askingWay }: PromptSurroundings,
+): Promise<PromptResponse> {
+  // Once the client has cancelled, the turn has no more events but its end, as cancelled.
+  for await (const event of turn.events) {
+    if (event.type === "reply-text") {
+      await client.notify(methods.client.session.update, {
+        sessionId: request.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: event.text },
+        },
+      });
+    } else if (event.type === "input-requested") {
+      const answers = await askUser(event.requests, request.sessionId, client, askingWay);
+      // The user stopped the turn while being asked: its end, as cancelled, is still to come.
+      if (cancel.aborted) continue;
+      // Left unanswered, the requests stay pending: the next prompt brings them up again.
+      if (answers === undefined) return { stopReason: "cancelled" };
+      if (answers.length > 0) {
+        await (await daemon()).answerInputRequests(turn.conversationId, answers);
+      }
+    } else if (event.outcome === "failed") {
+      throw new RequestError(
+        INTERNAL_ERROR,
+        `Claude Science could not finish the reply: ${event.detail ?? "no reason given"}`,
+      );
+    } else {
+      return { stopReason: event.outcome === "cancelled" ? "cancelled" : "end_turn" };
+    }
+  }
+  throw new RequestError(INTERNAL_ERROR, "The connection to Claude Science closed mid-reply.");
 }
 
 /**

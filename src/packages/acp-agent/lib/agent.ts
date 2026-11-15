@@ -17,6 +17,7 @@ import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
 import { conversationsWithoutSession } from "./importable.ts";
+import { askingWayOf } from "./input-requests.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
 import { chooseSetting, settingsOptions } from "./settings.ts";
@@ -62,6 +63,8 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     return connection;
   };
   const projectOf = createFolderProjects(daemon);
+  // Known once the client has initialized, which it does before anything else.
+  let askingWay = askingWayOf(undefined);
   // The models are asked for anew for each session: the daemon's list can change while this
   // process runs. A list csbridge cannot read costs the model and effort options, not the
   // session.
@@ -86,20 +89,23 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
   };
 
   return agent({ name: "claude-science-bridge" })
-    .onRequest(methods.agent.initialize, () => ({
-      protocolVersion: PROTOCOL_VERSION,
-      agentInfo: {
-        name: "claude-science-bridge",
-        title: "Claude Science",
-        version: options.version,
-      },
-      agentCapabilities: {
-        loadSession: true,
-        promptCapabilities: { image: false, audio: false, embeddedContext: false },
-        sessionCapabilities: { list: {} },
-      },
-      authMethods: [],
-    }))
+    .onRequest(methods.agent.initialize, ({ params }) => {
+      askingWay = askingWayOf(params.clientCapabilities);
+      return {
+        protocolVersion: PROTOCOL_VERSION,
+        agentInfo: {
+          name: "claude-science-bridge",
+          title: "Claude Science",
+          version: options.version,
+        },
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: false, audio: false, embeddedContext: false },
+          sessionCapabilities: { list: {} },
+        },
+        authMethods: [],
+      };
+    })
     .onRequest(methods.agent.session.new, async ({ params, client }) => {
       // Connect now, so that a setup problem is reported when the session is opened rather than
       // after the user has typed a prompt.
@@ -185,6 +191,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         record,
         // Every session asked for the models when it was set up; a prompt does not ask again.
         models: () => knownModels,
+        askingWay,
         options: (current) =>
           knownModels === undefined ? undefined : settingsOptions(knownModels, current),
       });

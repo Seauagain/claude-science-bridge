@@ -132,6 +132,14 @@ class FakeDaemon implements FakeScienceDaemon {
     return this.#conversations.settings();
   }
 
+  inputResponses(): JsonRecord[] {
+    return this.#conversations.inputResponses();
+  }
+
+  answerInBrowser(approved: boolean): void {
+    this.#conversations.answerInBrowser(approved);
+  }
+
   cancelRequests(): string[] {
     return this.#conversations.cancelRequests();
   }
@@ -244,6 +252,12 @@ class FakeDaemon implements FakeScienceDaemon {
       return this.#conversations.messages(decodeURIComponent(id), url.searchParams);
     }
     if (target === "POST frames/cancel") return this.#conversations.cancel(decodeURIComponent(id));
+    if (target === "POST frames/resolve-input") {
+      return this.#conversations.resolveInput(
+        decodeURIComponent(id),
+        JSON.parse(await readBody(request)),
+      );
+    }
     return { status: 404, body: { detail: `Not found: ${route}` } };
   }
 

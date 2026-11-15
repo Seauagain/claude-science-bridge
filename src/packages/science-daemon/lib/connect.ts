@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { DaemonAccess } from "./access.ts";
 import { unlessCancelled } from "./cancellation.ts";
-import { readConversationState } from "./conversation-state.ts";
+import { readConversationState, readInputRequests } from "./conversation-state.ts";
 import { type Conversation, listConversations } from "./conversations.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
+import { answerInputRequests, type InputAnswer, type InputRequest } from "./input-requests.ts";
 import { logIn } from "./login.ts";
 import {
   type ConversationSettings,
@@ -103,6 +104,22 @@ export interface ScienceDaemon {
     cancel: AbortSignal,
     settings?: ConversationSettings,
   ): Promise<Turn>;
+  /**
+   * Follows the turn of a conversation that stopped to ask the user for approvals or answers
+   * nobody has given yet. The turn's first event names them, and the turn goes on once they
+   * are answered. Resolves to nothing for a conversation that waits for no such thing. A
+   * conversation that does takes no further message until it has its answers.
+   *
+   * @throws ScienceDaemonError as {@link ScienceDaemon.sendMessage} does.
+   */
+  waitingTurn(conversationId: string, cancel: AbortSignal): Promise<Turn | undefined>;
+  /**
+   * Gives the daemon the user's answers to input requests of a conversation's turn, which then
+   * goes on. Requests that were answered elsewhere in the meantime are left as they are.
+   *
+   * @throws ScienceDaemonError when the daemon refuses the answers or cannot be reached.
+   */
+  answerInputRequests(conversationId: string, answers: readonly InputAnswer[]): Promise<void>;
   /**
    * Closes the connection for good and stops every attempt to restore it. Turns still running
    * stop producing events.
@@ -208,6 +225,15 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
         });
         return conversationId;
       }),
+    waitingTurn: (conversationId, cancel) =>
+      followTurn(channel, cancel, async () => {
+        const pending = await readInputRequests(http, conversationId);
+        return pending.length === 0 ? undefined : { conversationId, pending };
+      }),
+    async answerInputRequests(conversationId, answers) {
+      await socket.ready();
+      await answerInputRequests(http, conversationId, answers);
+    },
     close: () => socket.close(),
   };
 }
@@ -225,11 +251,39 @@ interface TurnChannel {
  * the message, to the identifier of the conversation it went to. Aborting `cancel` stops the
  * turn.
  */
-async function startTurn(
-  { http, socket, cancelTimeoutMs }: TurnChannel,
+function startTurn(
+  channel: TurnChannel,
   cancel: AbortSignal,
   send: () => Promise<string>,
 ): Promise<Turn> {
+  return followTurn(channel, cancel, async () => ({ conversationId: await send(), pending: [] }));
+}
+
+/** The conversation whose turn is to be followed, and what it is waiting on from the start. */
+interface TurnStart {
+  readonly conversationId: string;
+  readonly pending: readonly InputRequest[];
+}
+
+/**
+ * Follows a turn from the moment `begin` has run, missing none of its events. `begin` resolves
+ * to the turn's conversation, or to nothing when there turns out to be no turn to follow.
+ */
+function followTurn(
+  channel: TurnChannel,
+  cancel: AbortSignal,
+  begin: () => Promise<TurnStart>,
+): Promise<Turn>;
+function followTurn(
+  channel: TurnChannel,
+  cancel: AbortSignal,
+  begin: () => Promise<TurnStart | undefined>,
+): Promise<Turn | undefined>;
+async function followTurn(
+  { http, socket, cancelTimeoutMs }: TurnChannel,
+  cancel: AbortSignal,
+  begin: () => Promise<TurnStart | undefined>,
+): Promise<Turn | undefined> {
   // A turn cannot be followed without the socket, and after a long outage only reopening it
   // finds out where the daemon is now. That can take a while: a caller that cancels meanwhile
   // is answered at once, and its message is not sent.
@@ -249,13 +303,23 @@ async function startTurn(
   const stopListening = socket.onSignal((signal) => deliver(signal));
 
   try {
-    const conversationId = await send();
-    const tracker = new TurnTracker(conversationId, cancel, {
-      release: stopListening,
-      readState: () => readConversationState(http, conversationId),
-      requestCancel: () => http.post(`/frames/${encodeURIComponent(conversationId)}/cancel`),
-      cancelTimeoutMs,
-    });
+    const start = await begin();
+    if (start === undefined) {
+      stopListening();
+      return undefined;
+    }
+    const { conversationId, pending } = start;
+    const tracker = new TurnTracker(
+      conversationId,
+      cancel,
+      {
+        release: stopListening,
+        readState: () => readConversationState(http, conversationId),
+        requestCancel: () => http.post(`/frames/${encodeURIComponent(conversationId)}/cancel`),
+        cancelTimeoutMs,
+      },
+      pending,
+    );
     for (const signal of buffered) tracker.accept(signal);
     deliver = (signal) => tracker.accept(signal);
     return { conversationId, events: tracker.events };

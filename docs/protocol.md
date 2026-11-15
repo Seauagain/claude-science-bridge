@@ -62,7 +62,7 @@ All paths are under `/api`.
 | `POST /projects/<project_id>/request`                  | `{ input_data: { request: <text> }, model?, effort? }` → `{ root_frame_id, frame_id, status: "accepted" }`. Starts a new conversation in the project and its first turn.                                                  | **[live]** |
 | `POST /request`                                        | `{ target_agent, root_frame_id, frame_id, plan_mode: false, intent_id, input_data: { request: <text> } }` → `{ root_frame_id, frame_id, status }`. Sends a further message to an existing conversation and starts a turn. | **[live]** |
 | `POST /frames/<root_id>/cancel`                        | no body → `{ root_frame_id, cancelled_frames: [ids] }`                                                                                                                                                                    | **[live]** |
-| `POST /frames/<id>/resolve-input`                      | `{ responses }`. Answers pending input or approval requests.                                                                                                                                                              | **[web]**  |
+| `POST /frames/<id>/resolve-input`                      | `{ responses: [...] }` → `{ root_frame_id, frame_id, status, race_lost_refusals, remaining_tool_ids }`. Answers input requests. See "Input requests".                                                                     | **[live]** |
 
 Notes on `POST /request`, all **[live]**:
 
@@ -87,8 +87,53 @@ Frame `status` values: `processing`, `completed`, `failed`, `success`, `replaced
 `awaiting_plan_approval`, `awaiting_user_response`. `processing`, `completed` and `cancelled` are
 **[live]**; the rest are **[web]**. The web client treats `completed`, `failed`, `cancelled`,
 `success` and `replaced` as terminal, and the two `awaiting_*` values as settled but waiting for
-the user. A `processing` frame whose `has_pending_input` is true is waiting for an approval; the
-requests are in `pending_input_requests`.
+the user. `awaiting_user_response` is **[live]** for a turn that stopped to ask: see "Input
+requests".
+
+## Input requests
+
+What the daemon asks the user before a turn can go on: an approval, such as access to a folder
+on the user's computer, or a question.
+
+- A turn that stops to ask goes to status `awaiting_user_response`. The `frame_update` event
+  that says so carries the requests in `pending_input_requests`, and `has_pending_input: true`;
+  the daemon sends that event twice. Over HTTP the requests are in the frame's
+  `output_data.pending_input_requests`, where they show up to a quarter of a second after the
+  event. **[live]**
+- A request for folder access, observed: `{ kind: "host", target: <path>, requested_mode: "ro" |
+  "rw", requestId, frameId, rootFrameId, projectId, tool_id, createdAt, mode: "parked" }`. It
+  follows a `request_host_access` tool use by the assistant, whose tool result comes at once.
+  For a request of the conversation's own turn `frameId` is the conversation. **[live]**
+- While a request is pending, `POST /request` answers 400 with `detail: "Please answer the
+  pending question(s) before sending a new message."`. **[live]**
+- `POST /frames/<frameId>/resolve-input` with `{ responses: [...] }` answers requests. A
+  response is `{ requestId, tool_id, approved, action }` plus what its kind takes:
+  - deny: `approved: false, action: "deny"`. **[live]**
+  - allow folder access: `approved: true, action: "allow", mode: "ro" | "rw", scope: "always"`.
+    The daemon then lists the folder under `GET /preferences/host-grants`. **[live]**
+  - allow anything else: `approved: true, action: "allow"`, with `scope: "conversation" |
+    "project" | "always"` to have it remembered and no `scope` for this once. **[web]**
+  - a question (`kind: "ask"`, with `questions: [{ question, header, options: [{ label,
+    description }], multiSelect }]`): `approved: true, action: "answer", answers: { <question>:
+    <label> }`, or `approved: false, action: "cancel"` to skip it. **[web]**
+- The answer to `resolve-input` is `{ root_frame_id, frame_id, status: "accepted",
+  race_lost_refusals: [], remaining_tool_ids: [] }`. The turn then carries on by itself: the
+  frame is `processing` again at once and ends as any turn does. Answering requests that are
+  no longer pending gives `status: "already_resolved"` with their `tool_id`s in
+  `race_lost_refusals`. **[live]** Answering some of several gives `status: "partial"` with the
+  rest in `remaining_tool_ids`. **[web]**
+- The kinds the web client knows, with the scopes it offers for each and the one it suggests:
+  `network` and `host` (always), `host_delete` and `artifact_delete` (once, conversation),
+  `mcp_tool` and `customize_mutation` (once, conversation, project, always; suggests project),
+  `local_exec`, `remote_read`, `credential_access` and `byoc_kernel` (the same four; suggests
+  conversation), `remote_exec`, `byoc_submit` and `infer_submit` (the same four; suggests
+  once), `skill_license` (project, always), and without scopes `managed_endpoint_register`,
+  `set_goal` and `usage_checkpoint`. The kinds `credential_request`, `ssh_password`,
+  `provider_discovery` and `contact_email` take text the user types. **[web]**
+- Not observed: a request raised while the frame stays `processing` (`mode` other than
+  `"parked"`), a request of a sub-agent frame, and what a cancel does to a turn that stopped
+  to ask. The fake daemon raises parked requests only and drops them with a cancelled turn.
+  **[open]**
 
 ## Conversations and their messages
 
@@ -233,7 +278,9 @@ Nothing in this section was observed on the real daemon; the fake daemon invente
 2. Login lifetime, and what an expired login looks like on the WebSocket: whether the daemon
    closes the socket, and what it answers to a new handshake. See "Recovery" for the reading the
    adapter and the fake use. **[open]**
-3. Exact shape of `pending_input_requests` and of the `responses` that answer them. **[open]**
+3. Input requests other than folder access, which is the only kind exercised: the fields of
+   each kind, requests raised while the frame stays `processing`, requests of sub-agent frames,
+   and what a cancel does to a turn that stopped to ask. See "Input requests". **[open]**
 4. What `POST /frames/<id>/cancel` answers, and whether it changes the frame's status, for a
    conversation with no running turn or for an unknown id. The adapter only cancels a turn it is
    following; the fake answers an empty `cancelled_frames` and 404 respectively and changes

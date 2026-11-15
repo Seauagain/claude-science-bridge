@@ -146,9 +146,16 @@ to get a `csbridge` command.
   other attachments are refused with a message.
 - **Only the reply text is shown.** Reasoning, tool activity and sub-agent activity are not shown
   in the client yet. Open the conversation in Claude Science to see them.
-- **Approvals happen in Claude Science.** When Claude Science asks for an approval (for example
-  network access), the reply waits. Approve it in the Claude Science UI and the reply continues,
-  or stop the reply from the client.
+- **Claude Science's approvals come up in the client.** When Claude Science asks for an
+  approval, for example of access to a folder on your computer, the client asks you, with the
+  choices Claude Science gives, and the reply goes on with your answer. A client that can show
+  forms (T3 Code can) is asked with a form, which always reaches you; any other client gets an
+  ACP permission request, which it may decide by its own rules without showing it. A
+  conversation that is still waiting for an answer brings the question up again with your next
+  message.
+- **Some questions can only be answered in Claude Science.** Passwords, API keys, a contact
+  email, and questions with several parts or free text are described in the thread and wait
+  there for you to answer them in the Claude Science UI; the reply then goes on in the client.
 - **Model and effort come from Claude Science.** The client's pickers show the models Claude
   Science offers and the effort levels each takes. A model can be changed at any time; the effort
   is taken when a conversation starts, because Claude Science keeps it for the conversation.
@@ -214,7 +221,7 @@ For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in C
 - [x] Adapter: new conversations, streamed replies, follow-ups, cancel, recovery
 - [x] `csbridge projects`, `csbridge link`, `csbridge doctor`
 - [ ] Reasoning, tool activity and sub-agent activity in the client
-- [ ] Approvals as permission requests in the client
+- [x] Approvals in the client
 - [x] Model and effort selection
 - [ ] Attachments
 - [x] Listing, importing and continuing existing conversations from the client

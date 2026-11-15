@@ -34,6 +34,8 @@ export interface StoredConversation {
   status: string;
   /** Sent along with `status`; the reason when a turn failed. */
   statusDescription: string | undefined;
+  /** The input requests the user has not answered yet. Empty unless a turn stopped to ask. */
+  pendingRequests: JsonRecord[];
 }
 
 /** When the fake daemon says everything it does not keep a time for has happened. */
@@ -57,6 +59,10 @@ export function frameOf(conversation: StoredConversation): JsonRecord {
     created_at: TIMESTAMP,
     updated_at: conversation.updatedAt,
     ...(description === undefined ? {} : { status_description: description }),
+    // Over HTTP the pending requests are part of the frame's output. See docs/protocol.md.
+    ...(conversation.pendingRequests.length === 0
+      ? {}
+      : { output_data: { pending_input_requests: conversation.pendingRequests } }),
   };
 }
 

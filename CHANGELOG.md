@@ -24,6 +24,11 @@ All notable changes to this project are recorded here. The format follows
   to the project of the folder's name, creating the project if there is none.
 - A session offers the daemon's models and effort levels as options; a loaded conversation
   shows its own. The `/open` command continues an existing conversation in a new thread.
+- What Claude Science asks the user during a turn (approvals such as access to a folder, and
+  questions with choices) comes up in the client and the answer goes back to Claude Science: as
+  a form in a client that offers forms, as a permission request in any other. A conversation
+  that is still waiting for an answer no longer fails the next message with "Please answer the
+  pending question(s)": the question comes up first.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
 - `csbridge t3-import <folder>` brings every project and conversation into T3 Code in one go: a

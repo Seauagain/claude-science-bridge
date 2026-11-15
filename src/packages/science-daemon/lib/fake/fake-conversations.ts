@@ -22,6 +22,10 @@ interface Conversation extends StoredConversation {
   readonly received: string[];
   /** Cancels the turn in progress. Undefined while no turn is running. */
   cancelTurn: (() => void) | undefined;
+  /** The responses given so far to the requests of the turn's current question. */
+  answered: JsonRecord[];
+  /** Carries the turn on once its requests are all answered. Undefined while none are pending. */
+  resumeTurn: ((responses: JsonRecord[]) => void) | undefined;
 }
 
 const AGENT_NAME = "OPERON";
@@ -39,6 +43,7 @@ export class FakeConversations {
   readonly #scripts: ReplyScript[] = [];
   readonly #intentIds = new Set<string>();
   readonly #cancelRequests: string[] = [];
+  readonly #inputResponses: JsonRecord[] = [];
   /** Callers of {@link nextTranscriptRead} that are still waiting. */
   readonly #awaitingTranscriptRead: (() => void)[] = [];
   #endingTurnsOnCancel = true;
@@ -77,6 +82,83 @@ export class FakeConversations {
 
   cancelRequests(): string[] {
     return [...this.#cancelRequests];
+  }
+
+  /** Every response to an input request the daemon was sent, oldest first. */
+  inputResponses(): JsonRecord[] {
+    return [...this.#inputResponses];
+  }
+
+  /** Answers every pending input request as the user does in the browser: allow or deny. */
+  answerInBrowser(approved: boolean): void {
+    for (const conversation of this.#conversations) {
+      const responses = conversation.pendingRequests.map((request) => ({
+        requestId: request.requestId,
+        tool_id: request.tool_id,
+        approved,
+        action: approved ? "allow" : "deny",
+      }));
+      if (responses.length > 0) this.resolveInput(conversation.id, { responses });
+    }
+  }
+
+  /**
+   * `POST /frames/<id>/resolve-input`: the user's answers to pending input requests. Once none
+   * is left the turn carries on by itself.
+   */
+  resolveInput(frameId: string, body: unknown): Answer {
+    const conversation = this.#conversations.find(({ id }) => id === frameId);
+    if (conversation === undefined) return notFound(frameId);
+    const responses = isRecord(body) && Array.isArray(body.responses) ? body.responses : undefined;
+    if (responses === undefined || !responses.every(isRecord)) {
+      return { status: 400, body: { detail: "Invalid arguments: body.responses: Required" } };
+    }
+    const ids = { root_frame_id: conversation.id, frame_id: conversation.id };
+    if (conversation.pendingRequests.length === 0) {
+      return {
+        status: 200,
+        body: {
+          ...ids,
+          status: "already_resolved",
+          race_lost_refusals: responses.map((response) => response.tool_id),
+          remaining_tool_ids: [],
+        },
+      };
+    }
+    for (const response of responses) {
+      const index = conversation.pendingRequests.findIndex(
+        (request) => request.requestId === response.requestId,
+      );
+      if (index < 0 || conversation.pendingRequests[index]?.tool_id !== response.tool_id) {
+        return {
+          status: 400,
+          body: {
+            detail:
+              "fake daemon: a response names no pending request; docs/protocol.md does not " +
+              "say how the daemon answers that",
+          },
+        };
+      }
+      conversation.pendingRequests.splice(index, 1);
+      conversation.answered.push(response);
+      this.#inputResponses.push(response);
+    }
+    const remaining = conversation.pendingRequests.map((request) => request.tool_id);
+    if (remaining.length > 0) {
+      // Read from the web client, not observed: an answer to some of the requests.
+      return {
+        status: 200,
+        body: { ...ids, status: "partial", race_lost_refusals: [], remaining_tool_ids: remaining },
+      };
+    }
+    const resume = conversation.resumeTurn;
+    conversation.resumeTurn = undefined;
+    this.#setStatus(conversation, "processing");
+    resume?.(conversation.answered.splice(0));
+    return {
+      status: 200,
+      body: { ...ids, status: "accepted", race_lost_refusals: [], remaining_tool_ids: [] },
+    };
   }
 
   /** Resolves the next time a page of a transcript is served. */
@@ -202,9 +284,12 @@ export class FakeConversations {
       statusDescription: undefined,
       model: null,
       effort: null,
+      pendingRequests: [],
       ...frame,
       received: [],
       cancelTurn: undefined,
+      answered: [],
+      resumeTurn: undefined,
     };
     this.#conversations.push(conversation);
     return conversation;
@@ -229,6 +314,10 @@ export class FakeConversations {
       if (finished) return;
       finished = true;
       conversation.cancelTurn = undefined;
+      // docs/protocol.md does not say what becomes of requests still pending when a turn is
+      // cancelled. The fake drops them with the turn.
+      conversation.pendingRequests = [];
+      conversation.resumeTurn = undefined;
       if (reply !== "") conversation.transcript.push(textMessage("assistant", reply));
       this.#emit(conversation, { type: "frame_messages_delta", base_idx: 0, appended: null });
       this.#setStatus(conversation, status, description);
@@ -245,6 +334,22 @@ export class FakeConversations {
         if (finished) return;
         this.#emit(conversation, { type: "text_chunk", block_type: "thinking", chunk });
       },
+      ask: (requests) =>
+        new Promise((resolve) => {
+          if (finished) return;
+          conversation.pendingRequests = requests.map((request) => ({
+            ...request,
+            requestId: randomUUID(),
+            frameId: conversation.id,
+            rootFrameId: conversation.id,
+            projectId: conversation.projectId,
+            tool_id: `toolu_${randomUUID().replaceAll("-", "").slice(0, 24)}`,
+            createdAt: TIMESTAMP,
+            mode: "parked",
+          }));
+          conversation.resumeTurn = resolve;
+          this.#setStatus(conversation, "awaiting_user_response");
+        }),
       complete: () => finish("completed"),
       fail: (description) => finish("failed", description),
       cancelled,
@@ -276,8 +381,8 @@ export class FakeConversations {
       agent_name: conversation.agentName,
       project_id: conversation.projectId,
       conversation_type: "agent",
-      has_pending_input: false,
-      pending_input_requests: [],
+      has_pending_input: conversation.pendingRequests.length > 0,
+      pending_input_requests: conversation.pendingRequests,
       ...(description === undefined ? {} : { status_description: description }),
     });
   }

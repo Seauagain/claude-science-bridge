@@ -4,9 +4,13 @@ import { join } from "node:path";
 import {
   type ActiveSession,
   type ClientContext,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
   client,
   methods,
   PROTOCOL_VERSION,
+  type RequestPermissionOutcome,
+  type RequestPermissionRequest,
   type SessionNotification,
   type SessionUpdate,
   type StopReason,
@@ -52,6 +56,8 @@ export interface Harness {
       scienceCli?: ScienceCli;
       timing?: Partial<ConnectionTiming>;
       stateFolder?: string;
+      /** Whether the client says it can put forms to its user (ACP elicitation). Default: no. */
+      forms?: boolean;
     },
   ): Promise<T>;
   /**
@@ -59,6 +65,28 @@ export interface Harness {
    * is how a test sees the updates of a session it loaded instead of opening it.
    */
   updates(sessionId: string): SessionUpdate[];
+  /**
+   * Decides how the harness's clients answer the agent's permission requests from now on. Until
+   * a test says so, a permission request fails the prompt that raised it.
+   */
+  answerPermissions(
+    decide: (
+      request: RequestPermissionRequest,
+    ) => RequestPermissionOutcome | Promise<RequestPermissionOutcome>,
+  ): void;
+  /** The permission requests the harness's clients have been sent so far, oldest first. */
+  permissionRequests(): RequestPermissionRequest[];
+  /**
+   * Decides how the harness's clients answer the forms the agent puts to the user from now on.
+   * Until a test says so, a form fails the prompt that raised it.
+   */
+  answerForms(
+    decide: (
+      form: CreateElicitationRequest,
+    ) => CreateElicitationResponse | Promise<CreateElicitationResponse>,
+  ): void;
+  /** The forms the harness's clients have been sent so far, oldest first. */
+  forms(): CreateElicitationRequest[];
   dispose(): Promise<void>;
 }
 
@@ -72,12 +100,26 @@ export async function startHarness(): Promise<Harness> {
   };
   const stateFolder = join(await newFolder(), "state");
   const received: SessionNotification[] = [];
-  const testClient = client({ name: "test-client" }).onNotification(
-    methods.client.session.update,
-    ({ params }) => {
+  const forms: CreateElicitationRequest[] = [];
+  let fill: Parameters<Harness["answerForms"]>[0] = () => {
+    throw new Error("the test did not say how to answer forms");
+  };
+  const asked: RequestPermissionRequest[] = [];
+  let decide: Parameters<Harness["answerPermissions"]>[0] = () => {
+    throw new Error("the test did not say how to answer permission requests");
+  };
+  const testClient = client({ name: "test-client" })
+    .onNotification(methods.client.session.update, ({ params }) => {
       received.push(params);
-    },
-  );
+    })
+    .onRequest(methods.client.session.requestPermission, async ({ params }) => {
+      asked.push(params);
+      return { outcome: await decide(params) };
+    })
+    .onRequest(methods.client.elicitation.create, async ({ params }) => {
+      forms.push(params);
+      return fill(params);
+    });
 
   return {
     fake,
@@ -111,7 +153,7 @@ export async function startHarness(): Promise<Harness> {
         return await testClient.connectWith(agent, async (context) => {
           await context.request(methods.agent.initialize, {
             protocolVersion: PROTOCOL_VERSION,
-            clientCapabilities: {},
+            clientCapabilities: options.forms === true ? { elicitation: { form: {} } } : {},
           });
           return use(context);
         });
@@ -124,6 +166,14 @@ export async function startHarness(): Promise<Harness> {
     },
     updates: (sessionId) =>
       received.filter((each) => each.sessionId === sessionId).map((each) => each.update),
+    answerPermissions(decision) {
+      decide = decision;
+    },
+    permissionRequests: () => [...asked],
+    answerForms(decision) {
+      fill = decision;
+    },
+    forms: () => [...forms],
     async dispose() {
       await fake.close();
       await Promise.all(folders.map((folder) => rm(folder, { recursive: true, force: true })));

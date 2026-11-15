@@ -1,5 +1,6 @@
 import { AsyncQueue } from "./async-queue.ts";
 import type { ConversationState } from "./conversation-state.ts";
+import { type InputRequest, parseInputRequests } from "./input-requests.ts";
 import type { DaemonEvent, SocketSignal } from "./socket.ts";
 import type { ConnectionTiming } from "./timing.ts";
 
@@ -11,12 +12,18 @@ export type TurnOutcome =
   | "cancelled"
   /** The daemon gave up on the reply. */
   | "failed"
-  /** The daemon stopped to ask the user something; the next message answers it. */
+  /** The daemon stopped to ask the user something in its reply; the next message answers it. */
   | "waiting-for-user";
 
 /** One thing that happened during a turn. `ended` is always the last event. */
 export type TurnEvent =
   | { readonly type: "reply-text"; readonly text: string }
+  /**
+   * The daemon asks the user for approvals or answers, and the turn goes on once it has them:
+   * through `answerInputRequests`, or from the user in Claude Science itself. Each request is
+   * reported once.
+   */
+  | { readonly type: "input-requested"; readonly requests: readonly InputRequest[] }
   | { readonly type: "ended"; readonly outcome: TurnOutcome; readonly detail?: string };
 
 /** One user message and everything the daemon does in response. */
@@ -95,9 +102,20 @@ export class TurnTracker {
   #catchingUp: Promise<void> = Promise.resolve();
   /** Runs out when a cancelled turn has waited long enough for the daemon to end it. */
   #cancelDeadline: NodeJS.Timeout | undefined;
+  /** The input requests the consumer has been told about. */
+  readonly #asked = new Set<string>();
 
-  /** Aborting `cancel` stops the turn. It may be aborted already. */
-  constructor(conversationId: string, cancel: AbortSignal, connection: TurnConnection) {
+  /**
+   * Aborting `cancel` stops the turn. It may be aborted already. `pending` are input requests
+   * the conversation is waiting on from the start, for a turn that is followed from where it
+   * stopped to ask.
+   */
+  constructor(
+    conversationId: string,
+    cancel: AbortSignal,
+    connection: TurnConnection,
+    pending: readonly InputRequest[] = [],
+  ) {
     this.#conversationId = conversationId;
     this.#connection = connection;
     const stop = () => this.#stop();
@@ -107,6 +125,10 @@ export class TurnTracker {
       connection.release();
     });
     this.events = this.#eventsUntilCancelled(cancel);
+    // A turn that is followed from where it stopped to ask has started long ago. No message
+    // starts it, so there is no earlier turn whose final status the daemon would send again.
+    this.#started = pending.length > 0;
+    this.#ask(pending);
     if (cancel.aborted) stop();
     else cancel.addEventListener("abort", stop, { once: true });
   }
@@ -128,10 +150,18 @@ export class TurnTracker {
     }
   }
 
-  /** Events of other conversations and of sub-agent frames are ignored. */
+  /**
+   * Events of other conversations are ignored, and of the conversation's sub-agent frames all
+   * but what they ask the user.
+   */
   #acceptEvent(event: DaemonEvent): void {
     if (event.root_frame_id !== this.#conversationId) return;
-    if (event.frame_id !== this.#conversationId) return;
+    if (event.frame_id !== this.#conversationId) {
+      if (event.type === "frame_update" && !this.#eventsMissed) {
+        this.#ask(parseInputRequests(event.pending_input_requests));
+      }
+      return;
+    }
 
     if (event.type === "text_chunk") {
       // Reasoning text (`block_type: "thinking"`) is not part of the reply.
@@ -146,8 +176,11 @@ export class TurnTracker {
   }
 
   #acceptStatus(event: DaemonEvent): void {
+    const requests = parseInputRequests(event.pending_input_requests);
     if (event.status === "processing") {
       this.#started = true;
+      // An approval the daemon waits for while the turn runs on.
+      if (!this.#eventsMissed) this.#ask(requests);
       return;
     }
     if (typeof event.status !== "string") return;
@@ -155,7 +188,25 @@ export class TurnTracker {
     if (outcome === undefined) return;
 
     if (this.#eventsMissed) this.#catchUp();
-    else if (this.#started) this.#end(outcome, event.status_description);
+    else if (this.#started) this.#settle(outcome, event.status_description, requests);
+  }
+
+  /**
+   * Takes a status that ends a turn. With input requests pending the turn has only stopped to
+   * ask: it goes on once they are answered, and what ends it comes after that. The daemon
+   * sends that status more than once, which changes nothing here.
+   */
+  #settle(outcome: TurnOutcome, detail: unknown, requests: readonly InputRequest[]): void {
+    if (outcome === "waiting-for-user" && requests.length > 0) this.#ask(requests);
+    else this.#end(outcome, detail);
+  }
+
+  /** Tells the consumer about the input requests it has not been told about yet. */
+  #ask(requests: readonly InputRequest[]): void {
+    const fresh = requests.filter(({ requestId }) => !this.#asked.has(requestId));
+    if (fresh.length === 0) return;
+    for (const { requestId } of fresh) this.#asked.add(requestId);
+    this.#queue.push({ type: "input-requested", requests: fresh });
   }
 
   /** Reads the conversation's state and brings the turn up to date with it. */
@@ -166,7 +217,8 @@ export class TurnTracker {
         const state = await this.#connection.readState();
         this.#deliver(undeliveredText(this.#delivered, state.replyText));
         const outcome = OUTCOME_BY_STATUS[state.status];
-        if (outcome !== undefined) this.#end(outcome, state.statusDescription);
+        if (outcome === undefined) this.#ask(state.inputRequests);
+        else this.#settle(outcome, state.statusDescription, state.inputRequests);
       })
       .catch((error: unknown) => this.fail(error));
   }

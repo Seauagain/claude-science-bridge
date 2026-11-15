@@ -1,6 +1,7 @@
 import type { DaemonHttp } from "./http.ts";
+import { type InputRequest, parseInputRequests } from "./input-requests.ts";
 import { readMessages } from "./transcript.ts";
-import { expectArray, expectRecord, expectString, isRecord } from "./validate.ts";
+import { expectArray, expectRecord, expectString, isRecord, type JsonRecord } from "./validate.ts";
 
 /** Where a conversation stands, read over HTTP when events about it may have been missed. */
 export interface ConversationState {
@@ -13,6 +14,8 @@ export interface ConversationState {
    * user's message, that is, while no reply to it has been committed.
    */
   readonly replyText: string;
+  /** What the conversation is waiting for the user to approve or answer. Mostly nothing. */
+  readonly inputRequests: readonly InputRequest[];
 }
 
 const MESSAGES_CALL = "GET /frames/<id>/messages";
@@ -34,10 +37,32 @@ export async function readConversationState(
   );
   const status = expectString(frame, "status", frameCall);
   const description = frame.status_description;
+  const inputRequests = inputRequestsOf(frame);
   const replyText = closingReplyText(await readMessages(http, conversationId));
   return typeof description === "string" && description !== ""
-    ? { status, statusDescription: description, replyText }
-    : { status, replyText };
+    ? { status, statusDescription: description, replyText, inputRequests }
+    : { status, replyText, inputRequests };
+}
+
+/**
+ * Reads what a conversation is waiting for the user to approve or answer. See "Input
+ * requests" in docs/protocol.md.
+ */
+export async function readInputRequests(
+  http: DaemonHttp,
+  conversationId: string,
+): Promise<InputRequest[]> {
+  const frame = await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`);
+  return inputRequestsOf(expectRecord(frame, "GET /frames/<id>"));
+}
+
+/** A frame served over HTTP has its pending requests in its output; an event has them itself. */
+function inputRequestsOf(frame: JsonRecord): InputRequest[] {
+  const own = parseInputRequests(frame.pending_input_requests);
+  if (own.length > 0) return own;
+  return isRecord(frame.output_data)
+    ? parseInputRequests(frame.output_data.pending_input_requests)
+    : [];
 }
 
 /** The text of the last message, if the assistant wrote it. */

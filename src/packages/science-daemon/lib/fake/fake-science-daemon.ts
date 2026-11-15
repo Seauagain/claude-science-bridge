@@ -57,6 +57,13 @@ export interface FakeScienceDaemon {
   conversations(): FakeConversation[];
   /** The model and effort each conversation has, in the order of {@link conversations}. */
   conversationSettings(): { model: string | null; effort: string | null }[];
+  /** Every response to an input request the daemon was sent, oldest first, as it arrived. */
+  inputResponses(): JsonRecord[];
+  /**
+   * Answers every pending input request as the user does in the browser, allowing or denying
+   * each. The turns that asked carry on.
+   */
+  answerInBrowser(approved: boolean): void;
   /**
    * Identifiers of the conversations a cancel was requested for, oldest request first. Includes
    * requests that found no running turn.
