@@ -35,6 +35,26 @@ describe("csbridge projects", () => {
     expect(result.stdout).toBe(`${climate}  Climate model\n`);
   });
 
+  it("says so on standard error when there are no projects", async () => {
+    const result = await runCommand(["projects"], fake);
+
+    expect(result).toEqual({
+      exitCode: 0,
+      stdout: "",
+      stderr: "You have no projects yet: create one in Claude Science first.\n",
+    });
+  });
+
+  it("rejects arguments, since it takes none", async () => {
+    const result = await runCommand(["projects", "--all"], fake);
+
+    expect(result).toEqual({
+      exitCode: 2,
+      stdout: "",
+      stderr: 'Unexpected argument "--all".\n\nUsage: csbridge projects\n',
+    });
+  });
+
   it("fails with the reason on standard error when the daemon is not running", async () => {
     const scienceCli = async () => JSON.stringify({ running: false });
 

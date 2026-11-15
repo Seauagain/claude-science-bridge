@@ -143,3 +143,8 @@ Rules that follow from what was observed:
 1. Can a conversation be started without a project? **[open]**
 2. Login lifetime, and what an expired login looks like on the WebSocket. **[open]**
 3. Exact shape of `pending_input_requests` and of the `responses` that answer them. **[open]**
+4. The type of a project's `archived_at`, and whether `GET /projects` returns every project in one
+   response (`total` hints at paging). Until this is observed, the code treats a project as
+   archived when `archived_at` is anything but null or absent, and reads only the one response;
+   the fake daemon sends null for a project in use and a timestamp string for an archived one.
+   **[open]**

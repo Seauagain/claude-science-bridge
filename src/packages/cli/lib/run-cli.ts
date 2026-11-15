@@ -1,6 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 import { createScienceCli, type ScienceCli } from "../../science-daemon/index.ts";
 import { runAcpCommand } from "./acp-command.ts";
+import { runLinkCommand } from "./link-command.ts";
 import { runProjectsCommand } from "./projects-command.ts";
 
 /** The process surroundings a command runs in. Passed in so that tests can supply their own. */
@@ -18,8 +19,11 @@ export interface CliIo {
 const USAGE = `Usage: csbridge <command>
 
 Commands:
-  csbridge acp         Run as an ACP agent on standard input and output
-  csbridge projects    List your Claude Science projects
+  csbridge acp    Run as an ACP agent on standard input and output
+  csbridge projects
+                  List your Claude Science projects
+  csbridge link --project <id or name> [folder]
+                  Link a folder (default: the current one) to a project
 `;
 
 /**
@@ -27,12 +31,13 @@ Commands:
  * failure, 2 for wrong usage. Never writes anything but command output to standard output.
  */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
-  const [command] = argv;
+  const [command, ...args] = argv;
   const executable = io.env.CLAUDE_SCIENCE_BIN;
   const scienceCli = io.scienceCli ?? createScienceCli(executable ? { executable } : {});
 
   if (command === "acp") return runAcpCommand({ ...io, scienceCli });
-  if (command === "projects") return runProjectsCommand({ ...io, scienceCli });
+  if (command === "projects") return runProjectsCommand(args, { ...io, scienceCli });
+  if (command === "link") return runLinkCommand(args, { ...io, scienceCli });
 
   io.stderr.write(command === undefined ? USAGE : `Unknown command "${command}".\n\n${USAGE}`);
   return 2;

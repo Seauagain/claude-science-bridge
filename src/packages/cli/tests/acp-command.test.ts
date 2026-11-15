@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../science-daemon/testing.ts";
-import { startCli } from "./support/cli.ts";
+import { runCommand, startCli } from "./support/cli.ts";
 
 let fake: FakeScienceDaemon;
 
@@ -49,5 +49,16 @@ describe("csbridge with an unknown command", () => {
     expect(cli.output.stdout).toBe("");
     expect(cli.output.stderr).toMatch(/Unknown command "frobnicate"/);
     expect(cli.output.stderr).toMatch(/csbridge acp/);
+  });
+});
+
+describe("csbridge without a command", () => {
+  it("prints usage that names the setup commands", async () => {
+    const result = await runCommand([], fake);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/csbridge projects/);
+    expect(result.stderr).toMatch(/csbridge link --project <id or name> \[folder\]/);
   });
 });
