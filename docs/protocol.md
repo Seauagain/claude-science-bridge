@@ -143,3 +143,7 @@ Rules that follow from what was observed:
 1. Can a conversation be started without a project? **[open]**
 2. Login lifetime, and what an expired login looks like on the WebSocket. **[open]**
 3. Exact shape of `pending_input_requests` and of the `responses` that answer them. **[open]**
+4. What `POST /frames/<id>/cancel` answers, and whether it changes the frame's status, for a
+   conversation with no running turn or for an unknown id. The adapter only cancels a turn it is
+   following; the fake answers an empty `cancelled_frames` and 404 respectively and changes
+   nothing. **[open]**

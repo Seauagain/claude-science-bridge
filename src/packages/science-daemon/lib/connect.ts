@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { locateDaemon } from "./endpoint.ts";
-import { createDaemonHttp } from "./http.ts";
+import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
 import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonEvent, openDaemonSocket } from "./socket.ts";
@@ -70,7 +70,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
         const tracker = new TurnTracker(conversationId, stopListening);
         for (const event of buffered) tracker.accept(event);
         deliver = (event) => tracker.accept(event);
-        return { conversationId, events: tracker.events };
+        return followedTurn(http, conversationId, tracker);
       } catch (error) {
         stopListening();
         throw error;
@@ -95,12 +95,28 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
           intent_id: randomUUID(),
           input_data: { request: message },
         });
-        return { conversationId, events: tracker.events };
+        return followedTurn(http, conversationId, tracker);
       } catch (error) {
         stopListening();
         throw error;
       }
     },
     close: () => socket.close(),
+  };
+}
+
+/** The turn that `tracker` follows, as the package's callers see it. */
+function followedTurn(http: DaemonHttp, conversationId: string, tracker: TurnTracker): Turn {
+  return {
+    conversationId,
+    events: tracker.events,
+    cancel() {
+      if (tracker.ended) return;
+      // Not awaited: the daemon confirms through the turn's events, and a caller reacting to the
+      // user's cancel has nobody to hand a failure to except whoever reads those events.
+      http
+        .post(`/frames/${encodeURIComponent(conversationId)}/cancel`)
+        .catch((error: unknown) => tracker.fail(error));
+    },
   };
 }

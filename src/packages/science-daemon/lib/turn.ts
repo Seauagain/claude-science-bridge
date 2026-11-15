@@ -23,6 +23,13 @@ export interface Turn {
   readonly conversationId: string;
   /** The turn's events, in order. Iterate once; stopping early releases the turn. */
   readonly events: AsyncIterable<TurnEvent>;
+  /**
+   * Asks the daemon to stop the reply. The turn then ends with outcome `cancelled`, unless it
+   * ended some other way first. Does nothing once the turn has ended.
+   *
+   * Returns at once. If the daemon cannot be asked, `events` fails with a ScienceDaemonError.
+   */
+  cancel(): void;
 }
 
 /** Frame statuses that end a turn. See "REST endpoints used" in docs/protocol.md. */
@@ -49,12 +56,23 @@ export class TurnTracker {
    * previous turn's final status, sometimes just before the next turn starts.
    */
   #started = false;
+  #ended = false;
 
   /** `release` runs once, when the turn ends or its consumer stops listening. */
   constructor(conversationId: string, release: () => void) {
     this.#conversationId = conversationId;
     this.#queue = new AsyncQueue(release);
     this.events = this.#queue;
+  }
+
+  /** Whether the daemon has reported the end of the turn. */
+  get ended(): boolean {
+    return this.#ended;
+  }
+
+  /** Ends the turn's events with `error`. Does nothing once the turn has ended. */
+  fail(error: unknown): void {
+    this.#queue.fail(error);
   }
 
   /** Feeds one raw event. Events of other conversations and of sub-agent frames are ignored. */
@@ -87,5 +105,6 @@ export class TurnTracker {
         : { type: "ended", outcome },
     );
     this.#queue.end();
+    this.#ended = true;
   }
 }
