@@ -5,6 +5,8 @@ import { runAcpCommand } from "./acp-command.ts";
 import { runDoctorCommand } from "./doctor-command.ts";
 import { runLinkCommand } from "./link-command.ts";
 import { runProjectsCommand } from "./projects-command.ts";
+import type { T3Cli } from "./t3-cli.ts";
+import { runT3ImportCommand } from "./t3-import-command.ts";
 
 /** The process surroundings a command runs in. Passed in so that tests can supply their own. */
 export interface CliIo {
@@ -21,6 +23,8 @@ export interface CliIo {
   readonly homeFolder: string;
   /** Replaces the installed Science CLI. For tests. */
   readonly scienceCli?: ScienceCli;
+  /** The T3 Code command line. Absent on a machine without it, and in tests that do not need it. */
+  readonly t3Cli?: T3Cli;
 }
 
 /** The surroundings of one command: those of the process, with the Science CLI to use settled. */
@@ -38,6 +42,10 @@ Commands:
                   Link a folder (default: the current one) to a project
   csbridge link --all <folder>
                   Create a linked sub-folder of <folder> for every project
+  csbridge t3-import [--provider <id>] [--prefix <text>] <folder>
+                  Bring every project and conversation into T3 Code: linked sub-folders
+                  of <folder>, a T3 project for each, and a settled thread per
+                  conversation. Run it again to bring in what is new
   csbridge doctor Check the setup and say how to fix what is wrong
 
 Options:
@@ -78,6 +86,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   if (command === "acp") return runAcpCommand({ ...io, scienceCli });
   if (command === "projects") return runProjectsCommand(args, { ...io, scienceCli });
   if (command === "link") return runLinkCommand(args, { ...io, scienceCli });
+  if (command === "t3-import") return runT3ImportCommand(args, { ...io, scienceCli });
   if (command === "doctor") return runDoctorCommand({ ...io, scienceCli });
 
   io.stderr.write(command === undefined ? USAGE : `Unknown command "${command}".\n\n${USAGE}`);

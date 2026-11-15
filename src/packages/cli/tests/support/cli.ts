@@ -18,6 +18,8 @@ export interface CliSurroundings {
    * one test file, so that a test never reads or writes the home folder of whoever runs it.
    */
   readonly homeFolder?: string;
+  /** Stands in for the T3 Code command line. Defaults to none, as on a machine without it. */
+  readonly t3Cli?: (args: readonly string[]) => Promise<string>;
 }
 
 const scratchHome = mkdtempSync(join(tmpdir(), "csbridge-home-"));
@@ -43,6 +45,7 @@ export function startCli(argv: string[], surroundings: CliSurroundings) {
     cwd: surroundings.cwd ?? "/csbridge-test-no-such-folder",
     homeFolder: surroundings.homeFolder ?? scratchHome,
     scienceCli: surroundings.scienceCli,
+    ...(surroundings.t3Cli === undefined ? {} : { t3Cli: surroundings.t3Cli }),
   });
   return { stdin, output, exitCode };
 }

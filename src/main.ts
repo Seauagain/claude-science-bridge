@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
-import { runCli } from "./packages/cli/index.ts";
+import { createT3Cli, runCli } from "./packages/cli/index.ts";
 
 process.exitCode = await runCli(process.argv.slice(2), {
   stdin: process.stdin,
@@ -9,4 +9,5 @@ process.exitCode = await runCli(process.argv.slice(2), {
   env: process.env,
   cwd: process.cwd(),
   homeFolder: homedir(),
+  t3Cli: createT3Cli(),
 });

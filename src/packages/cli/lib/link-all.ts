@@ -8,7 +8,7 @@ import type { Project } from "../../science-daemon/index.ts";
 import { NO_PROJECTS } from "./project-listing.ts";
 
 /** What was done about one project's folder. `reason` says why it was skipped. */
-interface Outcome {
+export interface Outcome {
   readonly done: "created" | "linked" | "unchanged" | "skipped";
   readonly reason?: string;
 }
@@ -54,7 +54,7 @@ export async function linkEveryProject(
 }
 
 /** Makes `folder` a folder linked to `project`, unless something else is in its place. */
-async function linkSubfolder(folder: string, project: Project): Promise<Outcome> {
+export async function linkSubfolder(folder: string, project: Project): Promise<Outcome> {
   const entry = await entryAt(folder);
   if (entry === undefined) {
     await mkdir(folder);

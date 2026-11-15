@@ -6,6 +6,7 @@ import { createScienceAgent } from "../../acp-agent/index.ts";
 import { connectScienceDaemon, type ScienceDaemon } from "../../science-daemon/index.ts";
 import { daemonSetup } from "./daemon-setup.ts";
 import type { CommandIo } from "./run-cli.ts";
+import { stateFolder } from "./state-folder.ts";
 
 /**
  * `csbridge acp`: serves one ACP client on standard input and output until it disconnects.
@@ -34,16 +35,6 @@ export async function runAcpCommand(io: CommandIo): Promise<number> {
     if (connection.status === "fulfilled") connection.value.close();
   }
   return 0;
-}
-
-/**
- * The folder the adapter keeps its own state in: the one `CSBRIDGE_STATE_DIR` names, or
- * `.csbridge` in the home folder. It is never the Claude Science data folder, which is
- * `.claude-science` there.
- */
-function stateFolder(io: CommandIo): string {
-  const named = io.env.CSBRIDGE_STATE_DIR;
-  return named ? resolve(io.cwd, named) : join(io.homeFolder, ".csbridge");
 }
 
 /** Reads this package's version. The relative path is the same from `src/` and from `dist/`. */

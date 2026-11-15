@@ -26,6 +26,10 @@ All notable changes to this project are recorded here. The format follows
   shows its own. The `/open` command continues an existing conversation in a new thread.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
+- `csbridge t3-import <folder>` brings every project and conversation into T3 Code in one go: a
+  linked sub-folder and a T3 project per project, and a thread per conversation that shows its
+  earlier messages, is on the conversation's model and is settled. Running it again brings in
+  only what is new. A thread that opens a conversation with `/open` settles itself in T3 Code.
 - `csbridge doctor` to check the setup, and the same actionable messages when a session cannot be
   opened.
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;

@@ -16,6 +16,7 @@ import {
 import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
+import { conversationsWithoutSession } from "./importable.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
 import { chooseSetting, settingsOptions } from "./settings.ts";
@@ -116,19 +117,20 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       try {
         const link = await findProjectLink(folder);
         if (link === undefined) return { sessions: [] };
-        const conversations = await (await daemon()).listConversations(link.projectId);
         // A conversation that a session of the client's own started is a thread there already.
         // Listed, it would be offered for import a second time, under another identifier.
-        const taken = await record.takenConversations();
+        const conversations = await conversationsWithoutSession(
+          await daemon(),
+          options.stateFolder,
+          link.projectId,
+        );
         return {
-          sessions: conversations
-            .filter((conversation) => !taken.has(conversation.conversationId))
-            .map((conversation) => ({
-              sessionId: conversation.conversationId,
-              cwd: folder,
-              title: conversation.title,
-              updatedAt: conversation.updatedAt,
-            })),
+          sessions: conversations.map((conversation) => ({
+            sessionId: conversation.conversationId,
+            cwd: folder,
+            title: conversation.title,
+            updatedAt: conversation.updatedAt,
+          })),
         };
       } catch (error) {
         return rethrowAsRequestError(error);
