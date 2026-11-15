@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeProjectLink } from "../../project-link/index.ts";
-import type { ScienceCli } from "../../science-daemon/index.ts";
+import { type ScienceCli, ScienceDaemonError } from "../../science-daemon/index.ts";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../science-daemon/testing.ts";
 import { runDoctor as runDoctorIn } from "./support/run-doctor.ts";
 
@@ -62,6 +62,30 @@ describe("csbridge doctor", () => {
       expect.stringMatching(/^FAIL +Daemon version: not checked.*"Science CLI"/),
       expect.stringMatching(/^FAIL +Login: not checked.*"Science CLI"/),
       expect.stringMatching(/^ok +Project link: /),
+    ]);
+    expect(exitCode).toBe(1);
+  });
+
+  it("keeps a check on one line when the failure it reports spans several", async () => {
+    const failsOverTwoLines = () =>
+      Promise.reject(
+        new ScienceDaemonError("science-cli-failed", "claude-science crashed.\n  Reinstall it."),
+      );
+
+    const { lines } = await runDoctor({ scienceCli: failsOverTwoLines });
+
+    expect(lines).toHaveLength(5);
+    expect(lines[0]).toBe("FAIL  Science CLI: claude-science crashed. Reinstall it.");
+  });
+
+  it("fails naming the call when the Science CLI prints something unexpected", async () => {
+    const printsNoJson = () => Promise.resolve("Claude Science is starting up\n");
+
+    const { exitCode, lines } = await runDoctor({ scienceCli: printsNoJson });
+
+    expect(lines.slice(0, 2)).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^FAIL +Daemon: "claude-science status" did not print JSON\. Run it/),
     ]);
     expect(exitCode).toBe(1);
   });

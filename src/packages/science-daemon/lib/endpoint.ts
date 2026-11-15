@@ -29,7 +29,11 @@ export function parseDaemonStatus(output: string): DaemonEndpoint {
   try {
     parsed = JSON.parse(output);
   } catch (cause) {
-    throw new ScienceDaemonError("science-cli-failed", `"${call}" did not print JSON.`, { cause });
+    throw new ScienceDaemonError(
+      "science-cli-failed",
+      `"${call}" did not print JSON. Run it in a terminal to see what it prints instead.`,
+      { cause },
+    );
   }
 
   const status = expectRecord(parsed, call);

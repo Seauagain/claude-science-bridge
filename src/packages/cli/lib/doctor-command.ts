@@ -15,7 +15,9 @@ const LABELS: Readonly<Record<SetupCheck["status"], string>> = {
 export async function runDoctorCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
   const checks = [...(await checkDaemonSetup(io.scienceCli)), await checkProjectLink(io.cwd)];
   for (const check of checks) {
-    io.stdout.write(`${LABELS[check.status].padEnd(4)}  ${check.name}: ${check.message}\n`);
+    // A message can quote the daemon or the Science CLI: keep it on the one line a check gets.
+    const message = check.message.replace(/\s*[\r\n]+\s*/g, " ");
+    io.stdout.write(`${LABELS[check.status].padEnd(4)}  ${check.name}: ${message}\n`);
   }
   return checks.some((check) => check.status === "failure") ? 1 : 0;
 }
