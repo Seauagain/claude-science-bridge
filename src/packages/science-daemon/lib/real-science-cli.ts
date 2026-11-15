@@ -18,6 +18,8 @@ export interface ScienceCliOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The user's home folder, which holds the default data folder. Defaults to the real one. */
   readonly homeFolder?: string;
+  /** How long one run of the program may take, in milliseconds. Default: 15 000. */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -27,14 +29,15 @@ export interface ScienceCliOptions {
  * skipped when nothing is installed there: that fails, naming the path.
  *
  * The returned function rejects with a `science-cli-failed` {@link ScienceDaemonError} when the
- * program cannot be found, and with the underlying error when it cannot be run or fails.
+ * program cannot be found, and with the underlying error when it cannot be run, fails, or is
+ * stopped because it ran longer than `options.timeoutMs`.
  */
 export function createScienceCli(options: ScienceCliOptions): ScienceCli {
   return async (args) => {
     const executable = await findExecutable(options);
     const { stdout } = await execFileAsync(executable, [...args], {
       encoding: "utf8",
-      timeout: 15_000,
+      timeout: options.timeoutMs ?? 15_000,
     });
     return stdout;
   };

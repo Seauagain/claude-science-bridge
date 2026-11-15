@@ -52,7 +52,8 @@ describe("csbridge doctor", () => {
   });
 
   it("fails naming CLAUDE_SCIENCE_BIN when the Science CLI is missing", async () => {
-    const missingScienceCli = () => Promise.reject(new Error("spawn claude-science ENOENT"));
+    const missingScienceCli = () =>
+      Promise.reject(Object.assign(new Error("spawn claude-science ENOENT"), { code: "ENOENT" }));
 
     const { exitCode, lines } = await runDoctor({ scienceCli: missingScienceCli });
 
