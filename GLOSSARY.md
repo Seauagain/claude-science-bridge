@@ -32,6 +32,9 @@ conversation. _Avoid_: using "session" for the login.
 **Project link**: the marker file `.csbridge/project.json` that ties a local folder to a
 project. A folder is **linked** when it or one of its ancestors holds one.
 
+**State folder**: where csbridge keeps its own record of which session belongs to which
+conversation (`sessions.jsonl`, identifiers only). Never inside the Claude Science data folder.
+
 **Adapter**: this program in its role as an ACP agent, `csbridge acp`.
 
 **Fake daemon**: the in-repo stand-in for the daemon used by tests. It implements

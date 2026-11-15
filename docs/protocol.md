@@ -253,3 +253,8 @@ Nothing in this section was observed on the real daemon; the fake daemon invente
 9. What the daemon answers to `POST /request` for a conversation whose turn is still `processing`.
    This can happen after a cancel that was not confirmed in time or could not be delivered. The
    fake refuses it with 400. **[open]**
+10. Assumptions the adapter makes about listing and loading that were not all observed: the frame
+    list is a bare JSON array and `limit=1000` is accepted (both seen live for small projects);
+    every listed frame has `id`, `name` and `updated_at` as non-empty strings; `GET
+    /frames/<unknown id>/messages` answers 404; a `tool_use` block carries `id`, `name` and
+    `input.human_description`; `POST /projects` accepts a name that is already taken. **[open]**

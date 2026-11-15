@@ -22,6 +22,9 @@ other agents:
   folder below it, become conversations in that project, so the client's "project, then threads"
   sidebar mirrors "project, then conversations".
 
+- Conversations that already exist in a project can be listed and imported as threads and
+  continued. A thread keeps working after the client restarts the adapter.
+
 The conversations stay in Claude Science: you can open them in its own UI at any time.
 
 ## Requirements
@@ -66,8 +69,12 @@ to get a `csbridge` command.
    $ csbridge link --project "Protein folding"
    ```
 
-   This writes `.csbridge/project.json` in the folder. The project must already exist in Claude
-   Science.
+   This writes `.csbridge/project.json` in the folder.
+
+   Linking by hand is optional. Any folder works: the first message of a thread in a folder that is
+   not linked links it to the project that has the folder's name, or to a new project of that name,
+   and says so in the thread. Run `csbridge link` to choose a different project, or when several
+   projects share the folder's name.
 
    To mirror all your projects at once, run `csbridge link --all ~/science-projects` (the folder
    must exist), then add the folders it lists as projects in your ACP client. Folder names are made
@@ -75,8 +82,7 @@ to get a `csbridge` command.
    folder that is already linked to a different project is skipped.
 
 3. Register the agent in your ACP client as a local command: the Node.js executable with the
-   arguments `/path/to/claude-science-bridge/dist/main.js acp`. Then start a thread in the linked
-   folder.
+   arguments `/path/to/claude-science-bridge/dist/main.js acp`. Then start a thread in any folder.
 
    In T3 Code this is a provider instance of the ACP kind with a local command. In its
    `settings.json` it looks like this:
@@ -110,6 +116,7 @@ to get a `csbridge` command.
 | `--claude-science-bin <path>` | The `claude-science` executable to use.                                                                                                                                                           |
 | `CLAUDE_SCIENCE_BIN`          | The same, as an environment variable. Without either, `PATH` and then `bin/` in the default Claude Science data folder are tried.                                                                 |
 | `CSBRIDGE_START_COMMAND`      | The command that starts Claude Science on this machine, shown when the daemon is not running. Set it if you start Claude Science through a launcher of your own. Default: `claude-science serve`. |
+| `CSBRIDGE_STATE_DIR`          | The folder csbridge keeps its own state in: which thread belongs to which conversation, identifiers only. Default: `.csbridge` in your home folder.                                               |
 
 ## What to expect
 
@@ -121,7 +128,12 @@ to get a `csbridge` command.
   network access), the reply waits. Approve it in the Claude Science UI and the reply continues,
   or stop the reply from the client.
 - **The model is Claude Science's default.** There is no model picker yet.
-- **New conversations only.** Existing conversations cannot be opened from the client yet.
+- **Importing is per project and by hand.** The client lists the conversations of the project a
+  folder is linked to; you choose which to import. In T3 Code this is "Native sessions" in the
+  provider's settings.
+- **An imported thread starts out empty.** T3 Code discards the history an agent replays while a
+  session is loaded. Type `/history` in the thread to see the earlier messages: what you typed,
+  the replies, and tool use as one line each. Nothing is sent to Claude Science for it.
 
 ## When the login or the connection is lost
 
@@ -159,7 +171,8 @@ message was sent is not sent at all.
 - The adapter talks to loopback only and makes no other network request. If you force Node.js to
   use a proxy for everything (`NODE_USE_ENV_PROXY=1`), make sure `NO_PROXY` includes `127.0.0.1`
   and `localhost`.
-- It never reads or writes the Claude Science data folder.
+- It never reads or writes the Claude Science data folder. It keeps one file of its own,
+  `sessions.jsonl` in its state folder, holding identifiers only.
 - No Anthropic prompts, skills or other bundled assets are redistributed here.
 
 For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in Chinese),
@@ -173,7 +186,7 @@ For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in C
 - [ ] Reasoning, tool activity and sub-agent activity in the client
 - [ ] Approvals as permission requests in the client
 - [ ] Model selection, attachments
-- [ ] Opening existing conversations from the client
+- [x] Listing, importing and continuing existing conversations from the client
 - [ ] Exporter: projects, conversations and artifacts as plain files
 
 ## License

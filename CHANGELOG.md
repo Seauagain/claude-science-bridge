@@ -16,6 +16,12 @@ All notable changes to this project are recorded here. The format follows
   reply interrupted by a drop is completed from the conversation's messages, and replies end with
   a clear error when the daemon stays away.
 - `csbridge projects` and `csbridge link` to link a folder to a Claude Science project.
+- The client can list a project's conversations, import one and continue it (`session/list`,
+  `session/load`). The `/history` command shows a conversation's earlier messages in the thread.
+- Sessions survive a restart of the adapter: which session belongs to which conversation is kept
+  in `CSBRIDGE_STATE_DIR` (default `~/.csbridge`).
+- A session can be opened in any folder. The first prompt in a folder that is not linked links it
+  to the project of the folder's name, creating the project if there is none.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
 - `csbridge doctor` to check the setup, and the same actionable messages when a session cannot be
