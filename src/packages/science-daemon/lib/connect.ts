@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
@@ -14,6 +15,13 @@ export interface ScienceDaemon {
    * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached.
    */
   startConversation(projectId: string, message: string): Promise<Turn>;
+  /**
+   * Sends a further message to an existing conversation, and with it starts the next turn.
+   * The conversation's previous turn must have ended.
+   *
+   * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached.
+   */
+  sendMessage(conversationId: string, message: string): Promise<Turn>;
   /** Closes the connection. Turns still running stop producing events. */
   close(): void;
 }
@@ -62,6 +70,31 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
         const tracker = new TurnTracker(conversationId, stopListening);
         for (const event of buffered) tracker.accept(event);
         deliver = (event) => tracker.accept(event);
+        return { conversationId, events: tracker.events };
+      } catch (error) {
+        stopListening();
+        throw error;
+      }
+    },
+    async sendMessage(conversationId, message) {
+      const frameCall = "GET /frames/<id>";
+      const frame = expectRecord(
+        await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
+        frameCall,
+      );
+      // The turn's first events can arrive before the response, so listen before sending.
+      const tracker = new TurnTracker(conversationId, () => stopListening());
+      const stopListening = socket.onEvent((event) => tracker.accept(event));
+
+      try {
+        await http.post("/request", {
+          target_agent: expectString(frame, "agent_name", frameCall),
+          root_frame_id: conversationId,
+          frame_id: conversationId,
+          plan_mode: false,
+          intent_id: randomUUID(),
+          input_data: { request: message },
+        });
         return { conversationId, events: tracker.events };
       } catch (error) {
         stopListening();

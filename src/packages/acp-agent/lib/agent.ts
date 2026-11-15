@@ -26,8 +26,11 @@ interface Session {
   readonly projectId: string;
   /** Set by the first prompt, which creates the conversation. */
   conversationId?: string;
+  /** True from the moment a prompt is taken on until its turn has ended. */
+  turnRunning: boolean;
 }
 
+const INVALID_REQUEST = -32600;
 const INVALID_PARAMS = -32602;
 const INTERNAL_ERROR = -32603;
 
@@ -35,7 +38,8 @@ const INTERNAL_ERROR = -32603;
  * Builds the ACP agent that fronts Claude Science. Connect it to a stream to serve one client.
  *
  * A session belongs to the project its working folder is linked to. Its first prompt starts a
- * conversation in that project.
+ * conversation in that project and later prompts continue it. Sessions run their turns
+ * independently of each other; one session takes one prompt at a time.
  */
 export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
   const sessions = new Map<string, Session>();
@@ -72,22 +76,28 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         );
       }
       const sessionId = randomUUID();
-      sessions.set(sessionId, { projectId: link.projectId });
+      sessions.set(sessionId, { projectId: link.projectId, turnRunning: false });
       return { sessionId };
     })
     .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessions.get(params.sessionId);
       if (session === undefined) throw RequestError.sessionNotFound(params.sessionId);
-      if (session.conversationId !== undefined) {
-        // TODO(#3): send further prompts to the session's conversation.
-        throw new RequestError(INTERNAL_ERROR, "Follow-up prompts are not supported yet.");
+      if (session.turnRunning) {
+        throw new RequestError(
+          INVALID_REQUEST,
+          "This session is still answering its previous prompt. " +
+            "Wait for that reply to finish, then send the prompt again.",
+        );
       }
 
+      session.turnRunning = true;
       try {
-        const turn = await (await daemon()).startConversation(
-          session.projectId,
-          promptText(params.prompt),
-        );
+        const message = promptText(params.prompt);
+        const science = await daemon();
+        const turn =
+          session.conversationId === undefined
+            ? await science.startConversation(session.projectId, message)
+            : await science.sendMessage(session.conversationId, message);
         session.conversationId = turn.conversationId;
         for await (const event of turn.events) {
           if (event.type === "reply-text") {
@@ -113,6 +123,8 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         );
       } catch (error) {
         return rethrowAsRequestError(error);
+      } finally {
+        session.turnRunning = false;
       }
     });
 }

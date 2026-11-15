@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import { type WebSocket, WebSocketServer } from "ws";
 import type { ScienceCli } from "../science-cli.ts";
 import { isRecord, type JsonRecord } from "../validate.ts";
+import { readFurtherMessage } from "./further-message.ts";
 
 /** A turn in progress on the fake daemon, handed to a {@link ReplyScript}. */
 export interface FakeTurn {
@@ -50,8 +51,11 @@ export interface FakeScienceDaemon {
 interface Conversation {
   readonly id: string;
   readonly projectId: string;
+  readonly agentName: string;
   readonly messages: string[];
   status: string;
+  /** Sent along with `status`; the reason when a turn failed. */
+  statusDescription: string | undefined;
 }
 
 const VERSION = "0.1.53";
@@ -78,6 +82,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #projects = new Map<string, string>();
   readonly #conversations: Conversation[] = [];
   readonly #scripts: ReplyScript[] = [];
+  readonly #intentIds = new Set<string>();
   #port = 0;
 
   constructor() {
@@ -172,7 +177,48 @@ class FakeDaemon implements FakeScienceDaemon {
     if (request.method === "POST" && startMatch) {
       return this.#startConversation(decodeURIComponent(startMatch[1] ?? ""), request, response);
     }
+    const frameMatch = /^\/api\/frames\/([^/]+)$/.exec(url.pathname);
+    if (request.method === "GET" && frameMatch) {
+      return this.#sendFrame(decodeURIComponent(frameMatch[1] ?? ""), response);
+    }
+    if (route === "POST /api/request") return this.#sendMessage(request, response);
     sendJson(response, 404, { detail: `Not found: ${route}` });
+  }
+
+  #sendFrame(frameId: string, response: ServerResponse): void {
+    const conversation = this.#conversations.find((candidate) => candidate.id === frameId);
+    if (conversation === undefined) {
+      sendJson(response, 404, { detail: `Frame ${frameId} not found` });
+      return;
+    }
+    sendJson(response, 200, {
+      id: conversation.id,
+      root_frame_id: conversation.id,
+      parent_frame_id: null,
+      project_id: conversation.projectId,
+      agent_name: conversation.agentName,
+      status: conversation.status,
+      conversation_type: "agent",
+    });
+  }
+
+  /** `POST /request`: a further message to an existing conversation. */
+  async #sendMessage(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const message = readFurtherMessage(
+      JSON.parse(await readBody(request)),
+      this.#conversations,
+      this.#intentIds,
+    );
+    if ("refusal" in message) {
+      return sendJson(response, message.refusal.httpStatus, { detail: message.refusal.detail });
+    }
+    this.#intentIds.add(message.intentId);
+    this.#beginTurn(message.conversation, message.text);
+    sendJson(response, 200, {
+      root_frame_id: message.conversation.id,
+      frame_id: message.conversation.id,
+      status: message.responseStatus,
+    });
   }
 
   async #startConversation(
@@ -194,8 +240,10 @@ class FakeDaemon implements FakeScienceDaemon {
     const conversation: Conversation = {
       id: randomUUID(),
       projectId,
+      agentName: AGENT_NAME,
       messages: [],
       status: "processing",
+      statusDescription: undefined,
     };
     this.#conversations.push(conversation);
     this.#beginTurn(conversation, input);
@@ -208,6 +256,8 @@ class FakeDaemon implements FakeScienceDaemon {
 
   /** Emits the events of "Turn lifecycle" in docs/protocol.md, then runs the reply script. */
   #beginTurn(conversation: Conversation, message: string): void {
+    // The daemon re-sends the previous turn's final status just before the next turn starts.
+    if (conversation.messages.length > 0) this.#emitStatus(conversation);
     conversation.messages.push(message);
     this.#setStatus(conversation, "processing");
     this.#emit(conversation, { type: "frame_activity", phase: "llm_call", iteration: 1 });
@@ -239,10 +289,16 @@ class FakeDaemon implements FakeScienceDaemon {
 
   #setStatus(conversation: Conversation, status: string, description?: string): void {
     conversation.status = status;
+    conversation.statusDescription = description;
+    this.#emitStatus(conversation);
+  }
+
+  #emitStatus(conversation: Conversation): void {
+    const description = conversation.statusDescription;
     this.#emit(conversation, {
       type: "frame_update",
-      status,
-      agent_name: AGENT_NAME,
+      status: conversation.status,
+      agent_name: conversation.agentName,
       project_id: conversation.projectId,
       conversation_type: "agent",
       has_pending_input: false,
