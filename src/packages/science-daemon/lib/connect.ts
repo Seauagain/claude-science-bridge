@@ -71,9 +71,6 @@ export interface ConnectOptions {
   readonly timing?: Partial<ConnectionTiming>;
 }
 
-/** Signals of the event socket kept while a message has not been accepted yet. */
-const MAX_BUFFERED_SIGNALS = 1000;
-
 /**
  * Finds the running daemon, logs in and opens the event connection.
  *
@@ -160,9 +157,14 @@ async function startTurn(
   // The turn's first events can arrive before the response that accepts the message, and for a
   // new conversation before its identifier is known. So listen first, and hand what arrived to
   // the turn once the message is accepted.
+  //
+  // Everything is kept, however much arrives: one socket carries all of the user's activity,
+  // and a signal left out could be the one that starts or ends this turn, which would then
+  // never end. The buffer is bounded in time instead, because the daemon gets
+  // `requestTimeoutMs` to answer each request that `send` makes.
   const buffered: SocketSignal[] = [];
   let deliver = (signal: SocketSignal) => {
-    if (buffered.length < MAX_BUFFERED_SIGNALS) buffered.push(signal);
+    buffered.push(signal);
   };
   const stopListening = socket.onSignal((signal) => deliver(signal));
 

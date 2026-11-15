@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gate, gate } from "./support/gate.ts";
 import { cancelTurn, type Harness, runTurn, startHarness } from "./support/harness.ts";
+import { heldMessage } from "./support/held-message.ts";
 
 let harness: Harness;
 
@@ -80,33 +81,21 @@ describe("cancelling a running reply", () => {
       turn.replyText("Too late to be shown");
       await turn.cancelled;
     });
-    // The message is sent, turned away because the login expired, and sent again after a new
-    // login. Holding back the login link keeps the message on its way for as long as it takes.
-    const messageOnItsWay = gate();
-    const loginLink = gate();
-    let loginExpired = false;
-    const scienceCli = async (args: readonly string[]) => {
-      if (args[0] === "url" && loginExpired) {
-        messageOnItsWay.open();
-        await loginLink.opened;
-      }
-      return harness.fake.scienceCli(args);
-    };
+    const message = heldMessage(harness.fake);
 
     const { chunks, stopReason } = await harness.withClient(
       async (context) => {
         const session = await context.buildSession(folder).start();
-        harness.fake.expireLogins();
-        loginExpired = true;
+        message.holdNextMessage();
         const turn = runTurn(session, "Fold this protein");
-        await messageOnItsWay.opened;
+        await message.onItsWay;
         await cancelTurn(context, session);
         // A request answered after the cancel gives the adapter time to have seen the cancel.
         await context.buildSession(folder).start();
-        loginLink.open();
+        message.release();
         return turn;
       },
-      { scienceCli },
+      { scienceCli: message.scienceCli },
     );
 
     expect(chunks).toEqual([]);

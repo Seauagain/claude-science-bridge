@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeProjectLink } from "../../project-link/index.ts";
 import { type Harness, runTurn, startHarness } from "./support/harness.ts";
+import { heldMessage } from "./support/held-message.ts";
 
 let harness: Harness;
 
@@ -64,6 +65,29 @@ describe("prompting a session", () => {
 
     expect(chunks).toEqual(["Mine. ", "Still mine."]);
     expect(stopReason).toBe("end_turn");
+  });
+
+  it("follows a turn whose message was accepted only after a flood of unrelated events", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    const message = heldMessage(harness.fake);
+
+    const turn = await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        message.holdNextMessage();
+        const turn = runTurn(session, "ping");
+        await message.onItsWay;
+        // The user's other activity, on the one socket that also carries this turn's events.
+        for (let event = 0; event < 1500; event++) {
+          harness.fake.broadcast({ type: "kernel_stats", cpu_percent: event % 100 });
+        }
+        message.release();
+        return turn;
+      },
+      { scienceCli: message.scienceCli },
+    );
+
+    expect(turn).toEqual({ chunks: ["pong"], stopReason: "end_turn" });
   });
 
   it("reports a turn that failed on the daemon, naming the cause", async () => {
