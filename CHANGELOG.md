@@ -22,6 +22,8 @@ All notable changes to this project are recorded here. The format follows
   in `CSBRIDGE_STATE_DIR` (default `~/.csbridge`).
 - A session can be opened in any folder. The first prompt in a folder that is not linked links it
   to the project of the folder's name, creating the project if there is none.
+- A session offers the daemon's models and effort levels as options; a loaded conversation
+  shows its own. The `/open` command continues an existing conversation in a new thread.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
 - `csbridge doctor` to check the setup, and the same actionable messages when a session cannot be

@@ -127,7 +127,9 @@ to get a `csbridge` command.
 - **Approvals happen in Claude Science.** When Claude Science asks for an approval (for example
   network access), the reply waits. Approve it in the Claude Science UI and the reply continues,
   or stop the reply from the client.
-- **The model is Claude Science's default.** There is no model picker yet.
+- **Model and effort come from Claude Science.** The client's pickers show the models Claude
+  Science offers and the effort levels each takes. A model can be changed at any time; the effort
+  is taken when a conversation starts, because Claude Science keeps it for the conversation.
 - **Importing is per project and by hand.** The client lists the conversations of the project a
   folder is linked to; you choose which to import. In T3 Code this is "Native sessions" in the
   provider's settings.
@@ -185,7 +187,8 @@ For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in C
 - [x] `csbridge projects`, `csbridge link`, `csbridge doctor`
 - [ ] Reasoning, tool activity and sub-agent activity in the client
 - [ ] Approvals as permission requests in the client
-- [ ] Model selection, attachments
+- [x] Model and effort selection
+- [ ] Attachments
 - [x] Listing, importing and continuing existing conversations from the client
 - [ ] Exporter: projects, conversations and artifacts as plain files
 

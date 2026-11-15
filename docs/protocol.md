@@ -258,3 +258,8 @@ Nothing in this section was observed on the real daemon; the fake daemon invente
     every listed frame has `id`, `name` and `updated_at` as non-empty strings; `GET
     /frames/<unknown id>/messages` answers 404; a `tool_use` block carries `id`, `name` and
     `input.human_description`; `POST /projects` accepts a name that is already taken. **[open]**
+11. `model` and `effort` on messages: a new conversation takes both (`POST
+    /projects/<id>/request`), and the frame then reports them. A further message through `POST
+    /request` changes the model but leaves the effort as it was; `POST /frames/<id>/message`
+    changed neither. **[live]** How the web client changes the effort of a running conversation,
+    if it can, is unknown. **[open]**
