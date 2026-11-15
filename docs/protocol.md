@@ -20,6 +20,8 @@ statement below as an observation about one version, not a contract.
 
 - `claude-science status` prints JSON and always exits 0. Fields used: `running` (boolean),
   `version` (string), `port` (number). **[live]**
+- The `claude-science` executable of a default installation is `~/.claude-science/bin/claude-science`;
+  `~/.claude-science` is the daemon's data folder. **[live]**
 - The daemon listens on loopback. `GET /health` answers 200 without a login; every `/api/*`
   route answers 401 without one. **[live]**
 
@@ -88,6 +90,25 @@ Frame `status` values: `processing`, `completed`, `failed`, `success`, `replaced
 the user. A `processing` frame whose `has_pending_input` is true is waiting for an approval; the
 requests are in `pending_input_requests`.
 
+## Conversations and their messages
+
+- `GET /frames?root_only=true&project_id=<id>&limit=<n>` lists a project's conversations, newest
+  first. Each has `id`, `name` (the title), `created_at`, `updated_at`, `status`, `is_hidden` and
+  `conversation_type`. Conversations the user sees have `conversation_type: "agent"`; a project
+  also holds frames of other types (for example `"uploads"`). Whether the list is ever cut short
+  below `limit`, and how to ask for the rest, is unknown. **[live]** for the fields, **[open]** for
+  paging.
+- `GET /frames/<id>/messages?from=<n>&limit=<n>` returns `{ frame_id, from, total, messages }`.
+  A message has `role` (`user` or `assistant`) and `content`. **[live]**
+- `content` is an array of blocks, or for some user messages a plain string. **[live]**
+- Blocks seen: `{ type: "text", text }` **[live]**, and in conversations that used tools
+  `tool_use` (`id`, `name`, `input` with a `human_description`), `tool_result`, `thinking`,
+  `image`. The tool blocks were seen in stored data, not fetched by us over this call. **[web]**
+- The daemon adds messages of its own with `role: "user"` and `_harness_notice: true` (system
+  context such as a compute snapshot or skill hints). They are not something the user typed and
+  must not be shown as such. **[live]**
+- A turn that was cancelled leaves no assistant message in the transcript. **[live]** (seen once)
+
 ## WebSocket
 
 - URL: `ws://<host>:<port>/api/ws?user_id=<user_id from /me>`. **[live]**
@@ -116,6 +137,13 @@ requests are in `pending_input_requests`.
 | `rate_limit_notice`    | `root_frame_id`, ...                                                                                                                                                  | The reply is paused by a usage limit.                                                                                          | **[web]**  |
 
 ### Turn lifecycle
+
+Not handled: `text_reset`. ACP cannot take back text already sent to the client, so the adapter
+ignores it; after a reset the client shows the discarded text followed by the restarted reply.
+
+Where a failed turn's reason is reported is unknown. The adapter reads `status_description` from
+the `frame_update` that ends the turn (the field was seen live on `frame_update`, but never on a
+failed turn) and says "no reason given" without it. **[open]**
 
 Observed order for one turn of a conversation whose frame id is `R`, all **[live]**:
 
