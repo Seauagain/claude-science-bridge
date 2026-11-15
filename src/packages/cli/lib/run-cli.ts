@@ -36,6 +36,8 @@ Commands:
                   List your Claude Science projects
   csbridge link --project <id or name> [folder]
                   Link a folder (default: the current one) to a project
+  csbridge link --all <folder>
+                  Create a linked sub-folder of <folder> for every project
   csbridge doctor Check the setup and say how to fix what is wrong
 
 Options:

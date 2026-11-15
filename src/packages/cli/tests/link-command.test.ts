@@ -250,7 +250,9 @@ describe("csbridge link in a folder that is already linked", () => {
 });
 
 describe("csbridge link with wrong usage", () => {
-  const USAGE = "Usage: csbridge link --project <id or name> [folder]\n";
+  const USAGE =
+    "Usage: csbridge link --project <id or name> [folder]\n" +
+    "       csbridge link --all <folder>\n";
 
   it.each([
     { argv: [], problem: "Say which project to link to with --project." },
