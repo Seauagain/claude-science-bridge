@@ -6,9 +6,12 @@ import {
   PROTOCOL_VERSION,
   RequestError,
 } from "@agentclientprotocol/sdk";
-import { findProjectLink, ProjectLinkError } from "../../project-link/index.ts";
+import { findProjectLink } from "../../project-link/index.ts";
 import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
-import { promptText } from "./prompt-text.ts";
+import { rethrowAsRequestError } from "./errors.ts";
+import { historyUpdates } from "./history.ts";
+import { answerPrompt, type Session } from "./prompt.ts";
+import { openSessionRecord } from "./session-record.ts";
 
 /** What {@link createScienceAgent} needs. */
 export interface ScienceAgentOptions {
@@ -17,35 +20,29 @@ export interface ScienceAgentOptions {
    * attempt, so the agent starts even when the daemon is not running yet.
    */
   readonly connectDaemon: () => Promise<ScienceDaemon>;
+  /**
+   * The folder csbridge keeps its own state in: the record of which session belongs to which
+   * conversation, which holds identifiers only. The folder is created when the first session
+   * is recorded, and is shared by every adapter process of the user. It must not be the Claude
+   * Science data folder.
+   */
+  readonly stateFolder: string;
   /** This program's version, reported to the client. */
   readonly version: string;
 }
 
-/** An ACP session: the client's handle on at most one conversation. */
-interface Session {
-  readonly projectId: string;
-  /** Set by the first prompt, which creates the conversation. */
-  conversationId?: string;
-  /**
-   * Cancels the prompt being answered, if any. A session takes one prompt at a time. Aborted by
-   * `session/cancel`; from then on none of the turn's updates are sent to the client.
-   */
-  activePrompt?: AbortController;
-}
-
-const INVALID_REQUEST = -32600;
-const INVALID_PARAMS = -32602;
-const INTERNAL_ERROR = -32603;
-
 /**
  * Builds the ACP agent that fronts Claude Science. Connect it to a stream to serve one client.
  *
- * A session belongs to the project its working folder is linked to. Its first prompt starts a
- * conversation in that project and later prompts continue it. Sessions run their turns
- * independently of each other; one session takes one prompt at a time.
+ * A session is opened in a working folder. Its first prompt starts a conversation in the
+ * project that folder is linked to, and later prompts continue it. The conversations of a
+ * folder's project can be listed as sessions, and loading one replays its history and continues
+ * it. Sessions run their turns independently of each other; one session takes one prompt at a
+ * time.
  */
 export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
   const sessions = new Map<string, Session>();
+  const record = openSessionRecord(options.stateFolder);
   let connection: Promise<ScienceDaemon> | undefined;
   const daemon = (): Promise<ScienceDaemon> => {
     connection ??= options.connectDaemon().catch((error: unknown) => {
@@ -64,90 +61,73 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         version: options.version,
       },
       agentCapabilities: {
-        loadSession: false,
+        loadSession: true,
         promptCapabilities: { image: false, audio: false, embeddedContext: false },
+        sessionCapabilities: { list: {} },
       },
       authMethods: [],
     }))
     .onRequest(methods.agent.session.new, async ({ params }) => {
-      const link = await findProjectLink(params.cwd).catch(rethrowAsRequestError);
-      if (link === undefined) {
-        throw new RequestError(
-          INVALID_PARAMS,
-          `${params.cwd} is not linked to a Claude Science project. ` +
-            'Run "csbridge link --project <name>" in that folder, then start a new session.',
-        );
-      }
       // Connect now, so that a setup problem is reported when the session is opened rather than
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
-      sessions.set(sessionId, { projectId: link.projectId });
+      sessions.set(sessionId, { cwd: params.cwd });
       return { sessionId };
     })
-    .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
+    .onRequest(methods.agent.session.list, async ({ params }) => {
+      const folder = params.cwd;
+      // Sessions are listed per folder: the conversations of the project it is linked to.
+      if (folder === undefined || folder === null) return { sessions: [] };
+      try {
+        const link = await findProjectLink(folder);
+        if (link === undefined) return { sessions: [] };
+        const conversations = await (await daemon()).listConversations(link.projectId);
+        // A conversation that a session of the client's own started is a thread there already.
+        // Listed, it would be offered for import a second time, under another identifier.
+        const taken = await record.takenConversations();
+        return {
+          sessions: conversations
+            .filter((conversation) => !taken.has(conversation.conversationId))
+            .map((conversation) => ({
+              sessionId: conversation.conversationId,
+              cwd: folder,
+              title: conversation.title,
+              updatedAt: conversation.updatedAt,
+            })),
+        };
+      } catch (error) {
+        return rethrowAsRequestError(error);
+      }
+    })
+    .onRequest(methods.agent.session.load, async ({ params, client }) => {
+      const { sessionId } = params;
+      try {
+        // A session the client opened has an identifier of its own, and its conversation is on
+        // record. Any other identifier is that of a conversation the client found in the list.
+        const conversationId = (await record.conversationOf(sessionId)) ?? sessionId;
+        const transcript = await (await daemon()).readTranscript(conversationId);
+        // The client fills the thread from these, so they all go out before the answer.
+        for (const update of historyUpdates(transcript)) {
+          await client.notify(methods.client.session.update, { sessionId, update });
+        }
+        // A session this process is serving already keeps its state, such as a running prompt.
+        if (!sessions.has(sessionId)) sessions.set(sessionId, { cwd: params.cwd, conversationId });
+        return {};
+      } catch (error) {
+        if (error instanceof ScienceDaemonError && error.kind === "not-found") {
+          throw RequestError.sessionNotFound(sessionId);
+        }
+        return rethrowAsRequestError(error);
+      }
+    })
+    .onRequest(methods.agent.session.prompt, ({ params, client }) => {
       const session = sessions.get(params.sessionId);
       if (session === undefined) throw RequestError.sessionNotFound(params.sessionId);
-      if (session.activePrompt !== undefined) {
-        throw new RequestError(
-          INVALID_REQUEST,
-          "This session is still answering its previous prompt. " +
-            "Wait for that reply to finish, then send the prompt again.",
-        );
-      }
-
-      const cancel = new AbortController();
-      session.activePrompt = cancel;
-      try {
-        const message = promptText(params.prompt);
-        const science = await daemon();
-        const turn =
-          session.conversationId === undefined
-            ? await science.startConversation(session.projectId, message, cancel.signal)
-            : await science.sendMessage(session.conversationId, message, cancel.signal);
-        session.conversationId = turn.conversationId;
-        // Once the client has cancelled, the turn has no more reply text and ends as cancelled.
-        for await (const event of turn.events) {
-          if (event.type === "reply-text") {
-            await client.notify(methods.client.session.update, {
-              sessionId: params.sessionId,
-              update: {
-                sessionUpdate: "agent_message_chunk",
-                content: { type: "text", text: event.text },
-              },
-            });
-          } else if (event.outcome === "failed") {
-            throw new RequestError(
-              INTERNAL_ERROR,
-              `Claude Science could not finish the reply: ${event.detail ?? "no reason given"}`,
-            );
-          } else {
-            return { stopReason: event.outcome === "cancelled" ? "cancelled" : "end_turn" };
-          }
-        }
-        throw new RequestError(
-          INTERNAL_ERROR,
-          "The connection to Claude Science closed mid-reply.",
-        );
-      } catch (error) {
-        // ACP wants a cancelled prompt answered as cancelled, whatever went wrong afterwards.
-        if (cancel.signal.aborted) return { stopReason: "cancelled" };
-        return rethrowAsRequestError(error);
-      } finally {
-        delete session.activePrompt;
-      }
+      return answerPrompt(session, params, { client, daemon, record });
     })
     .onNotification(methods.agent.session.cancel, ({ params }) => {
       // Nothing happens when no prompt is being answered or this one is cancelled already.
       sessions.get(params.sessionId)?.activePrompt?.abort();
     });
-}
-
-/** Passes protocol errors through and turns this project's own errors into protocol errors. */
-function rethrowAsRequestError(error: unknown): never {
-  if (error instanceof RequestError) throw error;
-  if (error instanceof ScienceDaemonError || error instanceof ProjectLinkError) {
-    throw new RequestError(INTERNAL_ERROR, error.message);
-  }
-  throw error;
 }

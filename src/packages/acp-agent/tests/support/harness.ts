@@ -7,6 +7,8 @@ import {
   client,
   methods,
   PROTOCOL_VERSION,
+  type SessionNotification,
+  type SessionUpdate,
   type StopReason,
 } from "@agentclientprotocol/sdk";
 import { writeProjectLink } from "../../../project-link/index.ts";
@@ -27,14 +29,33 @@ export interface Harness {
   /** Creates a temporary folder that is not linked to any project. */
   unlinkedFolder(): Promise<string>;
   /**
-   * Runs `use` as an ACP client connected to the agent, already initialized. The agent uses the
-   * fake daemon's Science CLI stand-in unless `options.scienceCli` replaces it, and the
-   * connection's production timing unless `options.timing` shortens it.
+   * The folder the harness's adapters keep their own state in, unless a client is given another
+   * one. It does not exist until an adapter creates it.
+   */
+  readonly stateFolder: string;
+  /** Creates an empty temporary folder that is removed with the harness. */
+  temporaryFolder(): Promise<string>;
+  /**
+   * Runs `use` as an ACP client connected to an agent of its own, already initialized. Each call
+   * stands for one adapter process: a second call is the adapter the client starts anew, on the
+   * same daemon and the same state folder. The agent uses the fake daemon's Science CLI stand-in
+   * unless `options.scienceCli` replaces it, the connection's production timing unless
+   * `options.timing` shortens it, and the harness's state folder unless `options.stateFolder`
+   * names another.
    */
   withClient<T>(
     use: (context: ClientContext) => Promise<T>,
-    options?: { scienceCli?: ScienceCli; timing?: Partial<ConnectionTiming> },
+    options?: {
+      scienceCli?: ScienceCli;
+      timing?: Partial<ConnectionTiming>;
+      stateFolder?: string;
+    },
   ): Promise<T>;
+  /**
+   * The updates the harness's clients have been sent for a session so far, oldest first. This
+   * is how a test sees the updates of a session it loaded instead of opening it.
+   */
+  updates(sessionId: string): SessionUpdate[];
   dispose(): Promise<void>;
 }
 
@@ -46,6 +67,14 @@ export async function startHarness(): Promise<Harness> {
     folders.push(folder);
     return folder;
   };
+  const stateFolder = join(await newFolder(), "state");
+  const received: SessionNotification[] = [];
+  const testClient = client({ name: "test-client" }).onNotification(
+    methods.client.session.update,
+    ({ params }) => {
+      received.push(params);
+    },
+  );
 
   return {
     fake,
@@ -56,6 +85,8 @@ export async function startHarness(): Promise<Harness> {
       return { folder, projectId };
     },
     unlinkedFolder: newFolder,
+    stateFolder,
+    temporaryFolder: newFolder,
     async withClient(use, options = {}) {
       const scienceCli = options.scienceCli ?? fake.scienceCli;
       const connections: Promise<ScienceDaemon>[] = [];
@@ -65,10 +96,11 @@ export async function startHarness(): Promise<Harness> {
           connections.push(connection);
           return connection;
         },
+        stateFolder: options.stateFolder ?? stateFolder,
         version: "0.0.0-test",
       });
       try {
-        return await client({ name: "test-client" }).connectWith(agent, async (context) => {
+        return await testClient.connectWith(agent, async (context) => {
           await context.request(methods.agent.initialize, {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: {},
@@ -82,6 +114,8 @@ export async function startHarness(): Promise<Harness> {
         }
       }
     },
+    updates: (sessionId) =>
+      received.filter((each) => each.sessionId === sessionId).map((each) => each.update),
     async dispose() {
       await fake.close();
       await Promise.all(folders.map((folder) => rm(folder, { recursive: true, force: true })));
@@ -90,7 +124,10 @@ export async function startHarness(): Promise<Harness> {
 }
 
 /** Cancels the session's running turn, as a client does when the user stops a reply. */
-export function cancelTurn(context: ClientContext, session: ActiveSession): Promise<void> {
+export function cancelTurn(
+  context: ClientContext,
+  session: { readonly sessionId: string },
+): Promise<void> {
   return context.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
 }
 

@@ -13,6 +13,12 @@ export function expectRecord(value: unknown, call: string): JsonRecord {
   throw unexpected(call, "expected a JSON object");
 }
 
+/** Returns `value` as a JSON array, or fails naming the `call` that produced it. */
+export function expectList(value: unknown, call: string): unknown[] {
+  if (Array.isArray(value)) return value;
+  throw unexpected(call, "expected a JSON array");
+}
+
 /** Returns the string field `field` of `record`, or fails naming the `call` that produced it. */
 export function expectString(record: JsonRecord, field: string, call: string): string {
   const value = record[field];

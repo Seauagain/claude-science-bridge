@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { createScienceAgent } from "../../acp-agent/index.ts";
@@ -21,6 +22,7 @@ export async function runAcpCommand(io: CommandIo): Promise<number> {
       connections.push(connection);
       return connection;
     },
+    stateFolder: stateFolder(io),
     version: await readVersion(),
   });
   const stream = ndJsonStream(Writable.toWeb(io.stdout), Readable.toWeb(io.stdin));
@@ -32,6 +34,16 @@ export async function runAcpCommand(io: CommandIo): Promise<number> {
     if (connection.status === "fulfilled") connection.value.close();
   }
   return 0;
+}
+
+/**
+ * The folder the adapter keeps its own state in: the one `CSBRIDGE_STATE_DIR` names, or
+ * `.csbridge` in the home folder. It is never the Claude Science data folder, which is
+ * `.claude-science` there.
+ */
+function stateFolder(io: CommandIo): string {
+  const named = io.env.CSBRIDGE_STATE_DIR;
+  return named ? resolve(io.cwd, named) : join(io.homeFolder, ".csbridge");
 }
 
 /** Reads this package's version. The relative path is the same from `src/` and from `dist/`. */

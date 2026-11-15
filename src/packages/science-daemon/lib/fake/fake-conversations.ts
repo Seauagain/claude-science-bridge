@@ -2,6 +2,14 @@ import { randomUUID } from "node:crypto";
 import { isRecord, type JsonRecord } from "../validate.ts";
 import { readFurtherMessage } from "./further-message.ts";
 import type { Answer } from "./http-exchange.ts";
+import {
+  frameOf,
+  listFrames,
+  messagesPage,
+  type StoredConversation,
+  type StoredMessage,
+  TIMESTAMP,
+} from "./stored-conversation.ts";
 
 /** A turn in progress on the fake daemon, handed to a {@link ReplyScript}. */
 export interface FakeTurn {
@@ -30,30 +38,46 @@ export type ReplyScript = (turn: FakeTurn) => void | Promise<void>;
 /** What the fake daemon recorded about one conversation. */
 export interface FakeConversation {
   readonly projectId: string;
-  /** User messages, in the order they were sent. */
+  /**
+   * The messages the daemon was sent for this conversation, in the order they arrived. The
+   * transcript an {@link ExistingConversation} came with is not among them.
+   */
   readonly messages: readonly string[];
   /** The conversation frame's current status. */
   readonly status: string;
 }
 
-interface Conversation {
-  readonly id: string;
-  readonly projectId: string;
-  readonly agentName: string;
+/**
+ * A conversation the daemon holds before the adapter under test has anything to do with it, as
+ * one the user had in the browser. Its last turn has ended.
+ */
+export interface ExistingConversation {
+  /** The conversation's title, which is the frame's `name`. */
+  readonly title: string;
+  /** The frame's `updated_at`, an ISO 8601 timestamp. */
+  readonly updatedAt: string;
+  /** Whether the frame is marked `is_hidden`. Default: false. */
+  readonly hidden?: boolean;
   /**
-   * The messages committed so far. A reply is committed when its turn ends, as one assistant
-   * message; while it is being streamed it is not part of the transcript.
+   * The frame's `conversation_type`. Default: `"agent"`, a conversation the user sees. A project
+   * also holds frames of other types, for example `"uploads"`.
    */
-  readonly transcript: { readonly role: "user" | "assistant"; readonly text: string }[];
-  status: string;
-  /** Sent along with `status`; the reason when a turn failed. */
-  statusDescription: string | undefined;
+  readonly conversationType?: string;
+  /** The transcript, oldest message first. Default: no messages. */
+  readonly transcript?: readonly ExistingMessage[];
+}
+
+/** One message of an {@link ExistingConversation}, as the daemon stores and serves it. */
+export type ExistingMessage = StoredMessage;
+
+interface Conversation extends StoredConversation {
+  /** The messages sent to the conversation, as {@link FakeConversation.messages} reports them. */
+  readonly received: string[];
   /** Cancels the turn in progress. Undefined while no turn is running. */
   cancelTurn: (() => void) | undefined;
 }
 
 const AGENT_NAME = "OPERON";
-const TIMESTAMP = "2026-11-15T08:00:00Z";
 const defaultReply: ReplyScript = (turn) => {
   turn.replyText("pong");
   turn.complete();
@@ -88,9 +112,9 @@ export class FakeConversations {
   }
 
   list(): FakeConversation[] {
-    return this.#conversations.map(({ projectId, transcript, status }) => ({
+    return this.#conversations.map(({ projectId, received, status }) => ({
       projectId,
-      messages: transcript.filter(({ role }) => role === "user").map(({ text }) => text),
+      messages: [...received],
       status,
     }));
   }
@@ -108,6 +132,17 @@ export class FakeConversations {
     return new Promise((resolve) => this.#awaitingTranscriptRead.push(resolve));
   }
 
+  /** Adds a conversation that exists already and returns its identifier. */
+  add(projectId: string, existing: ExistingConversation): string {
+    const conversation = this.#store(projectId, existing.title, "completed", {
+      conversationType: existing.conversationType ?? "agent",
+      hidden: existing.hidden ?? false,
+      updatedAt: existing.updatedAt,
+      transcript: [...(existing.transcript ?? [])],
+    });
+    return conversation.id;
+  }
+
   /** `POST /projects/<project_id>/request`, for a project that exists. */
   start(projectId: string, body: unknown): Answer {
     const input = isRecord(body) && isRecord(body.input_data) ? body.input_data.request : undefined;
@@ -118,16 +153,9 @@ export class FakeConversations {
       };
     }
 
-    const conversation: Conversation = {
-      id: randomUUID(),
-      projectId,
-      agentName: AGENT_NAME,
-      transcript: [],
-      status: "processing",
-      statusDescription: undefined,
-      cancelTurn: undefined,
-    };
-    this.#conversations.push(conversation);
+    // docs/protocol.md does not say what the daemon calls a conversation it has just been sent.
+    // The fake uses the first message.
+    const conversation = this.#store(projectId, input, "processing");
     this.#beginTurn(conversation, input);
     return {
       status: 200,
@@ -135,24 +163,16 @@ export class FakeConversations {
     };
   }
 
+  /** `GET /frames?root_only=true&project_id=<id>&limit=<n>`, for a project that exists. */
+  listFrames(query: URLSearchParams): Answer {
+    return listFrames(this.#conversations, query);
+  }
+
   /** `GET /frames/<id>`. */
   frame(frameId: string): Answer {
     const conversation = this.#conversations.find((candidate) => candidate.id === frameId);
     if (conversation === undefined) return notFound(frameId);
-    const description = conversation.statusDescription;
-    return {
-      status: 200,
-      body: {
-        id: conversation.id,
-        root_frame_id: conversation.id,
-        parent_frame_id: null,
-        project_id: conversation.projectId,
-        agent_name: conversation.agentName,
-        status: conversation.status,
-        conversation_type: "agent",
-        ...(description === undefined ? {} : { status_description: description }),
-      },
-    };
+    return { status: 200, body: frameOf(conversation) };
   }
 
   /** `POST /request`: a further message to an existing conversation. */
@@ -192,45 +212,48 @@ export class FakeConversations {
     };
   }
 
-  /**
-   * `GET /frames/<id>/messages?from=<n>&limit=<n>`: one page of the transcript.
-   *
-   * docs/protocol.md shows the route with both parameters only, so a request without them is
-   * refused instead of answered with an invented default.
-   */
+  /** `GET /frames/<id>/messages?from=<n>&limit=<n>`: one page of the transcript. */
   messages(frameId: string, query: URLSearchParams): Answer {
     const conversation = this.#conversations.find(({ id }) => id === frameId);
     if (conversation === undefined) return notFound(frameId);
-    const from = Number.parseInt(query.get("from") ?? "", 10);
-    const limit = Number.parseInt(query.get("limit") ?? "", 10);
-    if (!(from >= 0 && limit > 0)) {
-      return {
-        status: 400,
-        body: {
-          detail:
-            "fake daemon: from or limit is missing; " +
-            "docs/protocol.md does not say how the daemon answers that",
-        },
-      };
+    const answer = messagesPage(conversation, query);
+    if (answer.status === 200) {
+      for (const resolve of this.#awaitingTranscriptRead.splice(0)) resolve();
     }
-    for (const resolve of this.#awaitingTranscriptRead.splice(0)) resolve();
-    const page = conversation.transcript.slice(from, from + limit).map(({ role, text }) => ({
-      role,
-      content: [{ type: "text", text }],
-      _uuid: randomUUID(),
-      _ts: TIMESTAMP,
-    }));
-    return {
-      status: 200,
-      body: { frame_id: frameId, from, total: conversation.transcript.length, messages: page },
+    return answer;
+  }
+
+  #store(
+    projectId: string,
+    name: string,
+    status: string,
+    frame: Partial<StoredConversation> = {},
+  ): Conversation {
+    const conversation: Conversation = {
+      id: randomUUID(),
+      projectId,
+      agentName: AGENT_NAME,
+      name,
+      conversationType: "agent",
+      hidden: false,
+      updatedAt: TIMESTAMP,
+      transcript: [],
+      status,
+      statusDescription: undefined,
+      ...frame,
+      received: [],
+      cancelTurn: undefined,
     };
+    this.#conversations.push(conversation);
+    return conversation;
   }
 
   /** Emits the events of "Turn lifecycle" in docs/protocol.md, then runs the reply script. */
   #beginTurn(conversation: Conversation, message: string): void {
     // The daemon re-sends the previous turn's final status just before the next turn starts.
     if (conversation.transcript.length > 0) this.#emitStatus(conversation);
-    conversation.transcript.push({ role: "user", text: message });
+    conversation.received.push(message);
+    conversation.transcript.push(textMessage("user", message));
     this.#setStatus(conversation, "processing");
     this.#emit(conversation, { type: "frame_activity", phase: "llm_call", iteration: 1 });
 
@@ -244,7 +267,7 @@ export class FakeConversations {
       if (finished) return;
       finished = true;
       conversation.cancelTurn = undefined;
-      if (reply !== "") conversation.transcript.push({ role: "assistant", text: reply });
+      if (reply !== "") conversation.transcript.push(textMessage("assistant", reply));
       this.#emit(conversation, { type: "frame_messages_delta", base_idx: 0, appended: null });
       this.#setStatus(conversation, status, description);
     };
@@ -300,6 +323,11 @@ export class FakeConversations {
   #emit(conversation: Conversation, event: JsonRecord): void {
     this.#broadcast({ ...event, root_frame_id: conversation.id, frame_id: conversation.id });
   }
+}
+
+/** A message as the daemon commits one that was sent or streamed as text. */
+function textMessage(role: "user" | "assistant", text: string): StoredMessage {
+  return { role, content: [{ type: "text", text }] };
 }
 
 function notFound(frameId: string): Answer {

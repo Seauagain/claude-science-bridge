@@ -14,6 +14,11 @@ export interface CliIo {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Absolute path of the working folder. Relative folder arguments are resolved against it. */
   readonly cwd: string;
+  /**
+   * Absolute path of the user's home folder. csbridge keeps its own state in `.csbridge` there
+   * unless the `CSBRIDGE_STATE_DIR` environment variable names another folder.
+   */
+  readonly homeFolder: string;
   /** Replaces the installed Science CLI. For tests. */
   readonly scienceCli?: ScienceCli;
 }
@@ -45,6 +50,9 @@ Environment:
   CSBRIDGE_START_COMMAND
                   The command that starts Claude Science on this machine, shown when it is
                   not running. Default: claude-science serve
+  CSBRIDGE_STATE_DIR
+                  The folder csbridge keeps its own state in: which session belongs to
+                  which conversation. Default: .csbridge in your home folder
 `;
 
 /**

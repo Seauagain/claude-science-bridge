@@ -1,6 +1,6 @@
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
-import type { FakeConversation, ReplyScript } from "./fake-conversations.ts";
+import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversations.ts";
 
 /** A stand-in for the Claude Science daemon that implements docs/protocol.md. */
 export interface FakeScienceDaemon {
@@ -36,6 +36,11 @@ export interface FakeScienceDaemon {
 
   /** Creates a project, archived if asked, and returns its identifier. */
   addProject(name: string, options?: { readonly archived?: boolean }): string;
+  /**
+   * Adds a conversation to a project as it would exist from earlier use, with its title, its
+   * transcript and its last turn ended, and returns its identifier.
+   */
+  addConversation(projectId: string, conversation: ExistingConversation): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
   onNextMessage(script: ReplyScript): void;
   /**
@@ -45,7 +50,7 @@ export interface FakeScienceDaemon {
    * stands for a daemon that is slow to stop a reply or fails to; nothing like it was observed.
    */
   endTurnsOnCancel(end: boolean): void;
-  /** Every conversation started so far, oldest first. */
+  /** Every conversation the daemon holds, added or started by a message, oldest first. */
   conversations(): FakeConversation[];
   /**
    * Identifiers of the conversations a cancel was requested for, oldest request first. Includes
