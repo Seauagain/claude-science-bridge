@@ -38,7 +38,11 @@ interface Conversation {
   readonly id: string;
   readonly projectId: string;
   readonly agentName: string;
-  readonly messages: string[];
+  /**
+   * The messages committed so far. A reply is committed when its turn ends, as one assistant
+   * message; while it is being streamed it is not part of the transcript.
+   */
+  readonly transcript: { readonly role: "user" | "assistant"; readonly text: string }[];
   status: string;
   /** Sent along with `status`; the reason when a turn failed. */
   statusDescription: string | undefined;
@@ -47,6 +51,7 @@ interface Conversation {
 }
 
 const AGENT_NAME = "OPERON";
+const TIMESTAMP = "2026-11-15T08:00:00Z";
 const defaultReply: ReplyScript = (turn) => {
   turn.replyText("pong");
   turn.complete();
@@ -73,9 +78,9 @@ export class FakeConversations {
   }
 
   list(): FakeConversation[] {
-    return this.#conversations.map(({ projectId, messages, status }) => ({
+    return this.#conversations.map(({ projectId, transcript, status }) => ({
       projectId,
-      messages: [...messages],
+      messages: transcript.filter(({ role }) => role === "user").map(({ text }) => text),
       status,
     }));
   }
@@ -102,7 +107,7 @@ export class FakeConversations {
       id: randomUUID(),
       projectId,
       agentName: AGENT_NAME,
-      messages: [],
+      transcript: [],
       status: "processing",
       statusDescription: undefined,
       cancelTurn: undefined,
@@ -119,6 +124,7 @@ export class FakeConversations {
   frame(frameId: string): Answer {
     const conversation = this.#conversations.find((candidate) => candidate.id === frameId);
     if (conversation === undefined) return notFound(frameId);
+    const description = conversation.statusDescription;
     return {
       status: 200,
       body: {
@@ -129,6 +135,7 @@ export class FakeConversations {
         agent_name: conversation.agentName,
         status: conversation.status,
         conversation_type: "agent",
+        ...(description === undefined ? {} : { status_description: description }),
       },
     };
   }
@@ -170,15 +177,49 @@ export class FakeConversations {
     };
   }
 
+  /**
+   * `GET /frames/<id>/messages?from=<n>&limit=<n>`: one page of the transcript.
+   *
+   * docs/protocol.md shows the route with both parameters only, so a request without them is
+   * refused instead of answered with an invented default.
+   */
+  messages(frameId: string, query: URLSearchParams): Answer {
+    const conversation = this.#conversations.find(({ id }) => id === frameId);
+    if (conversation === undefined) return notFound(frameId);
+    const from = Number.parseInt(query.get("from") ?? "", 10);
+    const limit = Number.parseInt(query.get("limit") ?? "", 10);
+    if (!(from >= 0 && limit > 0)) {
+      return {
+        status: 400,
+        body: {
+          detail:
+            "fake daemon: from or limit is missing; " +
+            "docs/protocol.md does not say how the daemon answers that",
+        },
+      };
+    }
+    const page = conversation.transcript.slice(from, from + limit).map(({ role, text }) => ({
+      role,
+      content: [{ type: "text", text }],
+      _uuid: randomUUID(),
+      _ts: TIMESTAMP,
+    }));
+    return {
+      status: 200,
+      body: { frame_id: frameId, from, total: conversation.transcript.length, messages: page },
+    };
+  }
+
   /** Emits the events of "Turn lifecycle" in docs/protocol.md, then runs the reply script. */
   #beginTurn(conversation: Conversation, message: string): void {
     // The daemon re-sends the previous turn's final status just before the next turn starts.
-    if (conversation.messages.length > 0) this.#emitStatus(conversation);
-    conversation.messages.push(message);
+    if (conversation.transcript.length > 0) this.#emitStatus(conversation);
+    conversation.transcript.push({ role: "user", text: message });
     this.#setStatus(conversation, "processing");
     this.#emit(conversation, { type: "frame_activity", phase: "llm_call", iteration: 1 });
 
     let finished = false;
+    let reply = "";
     let announceCancelled = () => {};
     const cancelled = new Promise<void>((resolve) => {
       announceCancelled = resolve;
@@ -187,6 +228,7 @@ export class FakeConversations {
       if (finished) return;
       finished = true;
       conversation.cancelTurn = undefined;
+      if (reply !== "") conversation.transcript.push({ role: "assistant", text: reply });
       this.#emit(conversation, { type: "frame_messages_delta", base_idx: 0, appended: null });
       this.#setStatus(conversation, status, description);
     };
@@ -194,7 +236,9 @@ export class FakeConversations {
       conversationId: conversation.id,
       message,
       replyText: (chunk) => {
-        if (!finished) this.#emit(conversation, { type: "text_chunk", block_type: "text", chunk });
+        if (finished) return;
+        reply += chunk;
+        this.#emit(conversation, { type: "text_chunk", block_type: "text", chunk });
       },
       complete: () => finish("completed"),
       fail: (description) => finish("failed", description),

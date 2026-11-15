@@ -1,41 +1,13 @@
 import WebSocket from "ws";
 import { type DaemonAccess, LOGIN_NOT_RENEWED } from "./access.ts";
 import { ScienceDaemonError } from "./errors.ts";
+import { type Heartbeat, keepAlive } from "./heartbeat.ts";
 import type { Login } from "./login.ts";
+import { type ConnectionTiming, MAX_RECONNECT_DELAY_MS } from "./timing.ts";
 import { isRecord, type JsonRecord } from "./validate.ts";
 
 /** One message pushed by the daemon. Only `type` is guaranteed; read other fields defensively. */
 export type DaemonEvent = JsonRecord & { readonly type: string };
-
-/**
- * How patient the connection to the daemon is, in milliseconds. The defaults suit the real
- * daemon; tests pass shorter values.
- */
-export interface ConnectionTiming {
-  /** How often the event socket is pinged. Default: 25 000, as the daemon's web client does. */
-  readonly pingIntervalMs: number;
-  /** How long a pong may take before the socket counts as dropped. Default: 10 000. */
-  readonly pongTimeoutMs: number;
-  /**
-   * How long to wait after the first failed attempt to reopen a dropped socket. The wait doubles
-   * with every further attempt, up to ten seconds. Default: 1 000.
-   */
-  readonly reconnectDelayMs: number;
-  /**
-   * How long to keep trying to reopen a dropped socket. After that, running turns end with an
-   * error; the next message makes a fresh attempt. Default: 60 000.
-   */
-  readonly reconnectGiveUpMs: number;
-}
-
-export const DEFAULT_TIMING: ConnectionTiming = {
-  pingIntervalMs: 25_000,
-  pongTimeoutMs: 10_000,
-  reconnectDelayMs: 1_000,
-  reconnectGiveUpMs: 60_000,
-};
-
-const MAX_RECONNECT_DELAY_MS = 10_000;
 
 /**
  * The daemon's event socket. One socket carries events for all of the user's conversations, so
@@ -45,10 +17,31 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
  * docs/protocol.md.
  */
 export interface DaemonSocket {
-  /** Registers a listener for every event. Returns a function that removes it. */
-  onEvent(listener: (event: DaemonEvent) => void): () => void;
+  /**
+   * Resolves once the socket is open. While it is being reopened this waits for the outcome;
+   * after it was given up this makes one more attempt.
+   *
+   * @throws ScienceDaemonError with kind `unreachable` when the socket cannot be opened.
+   */
+  ready(): Promise<void>;
+  /** Registers a listener for everything that happens. Returns a function that removes it. */
+  onSignal(listener: (signal: SocketSignal) => void): () => void;
+  /** Closes the socket for good. Listeners are told nothing further. */
   close(): void;
 }
+
+/** What a listener on the event socket is told. */
+export type SocketSignal =
+  | { readonly kind: "event"; readonly event: DaemonEvent }
+  /**
+   * The socket had dropped and is open again. Events sent in between are lost. Told before any
+   * event of the new socket.
+   */
+  | { readonly kind: "reconnected" }
+  /** The socket dropped and could not be reopened in the time allowed. */
+  | { readonly kind: "gone"; readonly error: ScienceDaemonError };
+
+const CLOSED = "The connection to Claude Science has been closed.";
 
 /** Opens the event socket for `userId`. Resolves once the handshake has completed. */
 export async function openDaemonSocket(
@@ -65,9 +58,13 @@ class EventSocket implements DaemonSocket {
   readonly #access: DaemonAccess;
   readonly #userId: string;
   readonly #timing: ConnectionTiming;
-  readonly #listeners = new Set<(event: DaemonEvent) => void>();
+  readonly #listeners = new Set<(signal: SocketSignal) => void>();
   /** The open socket and what keeps it alive. Undefined while there is none. */
   #current: { readonly socket: WebSocket; readonly heartbeat: Heartbeat } | undefined;
+  /** Whether a socket has been open before: the next one to open is a reconnection. */
+  #wasOpen = false;
+  /** The attempt to reopen a dropped socket, while one is under way. */
+  #reopening: Promise<void> | undefined;
   #closed = false;
   /** Ends the wait between two attempts to reopen the socket. */
   #stopWaiting = () => {};
@@ -93,7 +90,14 @@ class EventSocket implements DaemonSocket {
     );
   }
 
-  onEvent(listener: (event: DaemonEvent) => void): () => void {
+  ready(): Promise<void> {
+    if (this.#current !== undefined) return Promise.resolve();
+    // Either the socket is being reopened, and the caller waits for the outcome, or it was given
+    // up earlier, and whoever needs the daemon now gets one fresh attempt.
+    return this.#reopening ?? this.#reopen(0);
+  }
+
+  onSignal(listener: (signal: SocketSignal) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
@@ -132,7 +136,7 @@ class EventSocket implements DaemonSocket {
         if (this.#closed) {
           // Closed while the handshake was under way: nobody wants this socket any more.
           socket.terminate();
-          refuse("the connection was closed");
+          reject(new ScienceDaemonError("unreachable", CLOSED));
           return;
         }
         this.#adopt(socket);
@@ -148,23 +152,56 @@ class EventSocket implements DaemonSocket {
       const event = parseEvent(String(data));
       if (event === undefined) return;
       if (event.type === "pong") heartbeat.pongReceived();
-      for (const listener of [...this.#listeners]) listener(event);
+      else this.#tell({ kind: "event", event });
     });
     socket.once("close", () => {
       heartbeat.stop();
       this.#current = undefined;
-      if (!this.#closed) this.#reopen(Date.now() + this.#timing.reconnectGiveUpMs).catch(() => {});
+      if (this.#closed) return;
+      // Nobody awaits this unless they call `ready`: the listeners are told how it went.
+      this.#reopen(this.#timing.reconnectGiveUpMs).catch(() => {});
     });
+    // Told here, in the same step that starts the new socket's events, so that no listener can
+    // take an event of the new socket for the continuation of what it saw on the old one.
+    if (this.#wasOpen) this.#tell({ kind: "reconnected" });
+    this.#wasOpen = true;
+  }
+
+  #tell(signal: SocketSignal): void {
+    for (const listener of [...this.#listeners]) listener(signal);
   }
 
   /**
-   * Opens the socket again, waiting longer after every failed attempt, until `giveUpAt`. Each
-   * attempt first asks where the daemon is: after a restart it may listen on another port.
+   * Opens the socket again, trying for `keepTryingMs`. Success is told to the listeners when
+   * the new socket opens; failure is told to them here and thrown.
    */
-  async #reopen(giveUpAt: number): Promise<void> {
+  #reopen(keepTryingMs: number): Promise<void> {
+    this.#reopening = this.#openWithRetries(Date.now() + keepTryingMs)
+      .catch((cause: unknown) => {
+        const reason = cause instanceof ScienceDaemonError ? ` ${cause.message}` : "";
+        const error = new ScienceDaemonError(
+          "unreachable",
+          `The connection to Claude Science was lost and could not be restored.${reason}`,
+          { cause },
+        );
+        if (!this.#closed) this.#tell({ kind: "gone", error });
+        throw error;
+      })
+      .finally(() => {
+        this.#reopening = undefined;
+      });
+    return this.#reopening;
+  }
+
+  /**
+   * Opens the socket, waiting longer after every failed attempt, until `giveUpAt`. Each attempt
+   * first asks where the daemon is: after a restart it may listen on another port.
+   */
+  async #openWithRetries(giveUpAt: number): Promise<void> {
     let delay = this.#timing.reconnectDelayMs;
     for (;;) {
       try {
+        if (this.#closed) throw new ScienceDaemonError("unreachable", CLOSED);
         await this.#access.relocate();
         await this.open();
         return;
@@ -185,34 +222,6 @@ class EventSocket implements DaemonSocket {
       };
     });
   }
-}
-
-interface Heartbeat {
-  pongReceived(): void;
-  stop(): void;
-}
-
-/**
- * Pings `socket` at regular intervals and cuts it when a pong stays away, so that a socket that
- * died without a close does not go unnoticed.
- */
-function keepAlive(socket: WebSocket, timing: ConnectionTiming): Heartbeat {
-  let deadline: NodeJS.Timeout | undefined;
-  const interval = setInterval(() => {
-    socket.send('{"type":"ping"}');
-    // One deadline at a time: it runs from the first ping that went unanswered.
-    deadline ??= setTimeout(() => socket.terminate(), timing.pongTimeoutMs);
-  }, timing.pingIntervalMs);
-  return {
-    pongReceived() {
-      clearTimeout(deadline);
-      deadline = undefined;
-    },
-    stop() {
-      clearInterval(interval);
-      clearTimeout(deadline);
-    },
-  };
 }
 
 function parseEvent(text: string): DaemonEvent | undefined {

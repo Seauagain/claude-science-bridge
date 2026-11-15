@@ -48,6 +48,108 @@ describe("keeping the event socket alive", () => {
   });
 });
 
+describe("losing the event socket during a turn", () => {
+  it("finishes the turn and delivers the reply text it missed, without repeating any", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const firstChunkDelivered = gate();
+    harness.fake.onNextMessage(async (turn) => {
+      turn.replyText("The structure ");
+      await firstChunkDelivered.opened;
+      const reopened = harness.fake.nextEventSocket();
+      harness.fake.dropEventSockets();
+      // Streamed while nobody is listening.
+      turn.replyText("is a beta ");
+      await reopened;
+      turn.replyText("barrel.");
+      turn.complete();
+    });
+
+    const { chunks, stopReason } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "What is the fold of GFP?", () => firstChunkDelivered.open());
+    });
+
+    expect(chunks.join("")).toBe("The structure is a beta barrel.");
+    expect(stopReason).toBe("end_turn");
+    expect(harness.fake.conversations()).toEqual([
+      { projectId, messages: ["What is the fold of GFP?"], status: "completed" },
+    ]);
+  });
+
+  it("finishes a turn whose end it missed", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    const firstChunkDelivered = gate();
+    harness.fake.onNextMessage(async (turn) => {
+      turn.replyText("The structure ");
+      await firstChunkDelivered.opened;
+      harness.fake.dropEventSockets();
+      turn.replyText("is a beta barrel.");
+      turn.complete();
+    });
+
+    const { chunks, stopReason } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "What is the fold of GFP?", () => firstChunkDelivered.open());
+    });
+
+    expect(chunks.join("")).toBe("The structure is a beta barrel.");
+    expect(stopReason).toBe("end_turn");
+  });
+
+  it("reports a turn that failed while it was not listening, naming the cause", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    const firstChunkDelivered = gate();
+    harness.fake.onNextMessage(async (turn) => {
+      turn.replyText("Starting");
+      await firstChunkDelivered.opened;
+      harness.fake.dropEventSockets();
+      turn.fail("The sandbox ran out of memory");
+    });
+
+    const failure = harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "Fold this protein", () => firstChunkDelivered.open());
+    });
+
+    await expect(failure).rejects.toThrow(/The sandbox ran out of memory/);
+  });
+});
+
+describe("losing the daemon for good during a turn", () => {
+  it("ends the turn saying the daemon is unreachable, and answers a later prompt once it is back", async () => {
+    const { folder, projectId } = await harness.linkedFolder("Protein folding");
+    const firstChunkDelivered = gate();
+    harness.fake.onNextMessage(async (turn) => {
+      turn.replyText("Let me think about that");
+      await firstChunkDelivered.opened;
+      await harness.fake.stop();
+      // What the real daemon makes of a turn it was running when it stopped is not known. Here
+      // the turn does not survive, so that the conversation takes a further message afterwards.
+      turn.fail("The daemon stopped");
+    });
+
+    const { lostTurn, laterTurn } = await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        const lostTurn = await runTurn(session, "Fold this protein", () =>
+          firstChunkDelivered.open(),
+        ).catch(String);
+        await harness.fake.start();
+        return { lostTurn, laterTurn: await runTurn(session, "Try again") };
+      },
+      { timing: { reconnectDelayMs: 2, reconnectGiveUpMs: 10 } },
+    );
+
+    expect(lostTurn).toMatch(
+      /connection to Claude Science was lost and could not be restored.*not running.*claude-science serve/s,
+    );
+    expect(laterTurn).toEqual({ chunks: ["pong"], stopReason: "end_turn" });
+    expect(harness.fake.conversations()).toEqual([
+      { projectId, messages: ["Fold this protein", "Try again"], status: "completed" },
+    ]);
+  });
+});
+
 describe("losing the event socket between turns", () => {
   it("opens a new socket and answers the next prompt", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");

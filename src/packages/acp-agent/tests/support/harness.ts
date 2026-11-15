@@ -94,10 +94,14 @@ export function cancelTurn(context: ClientContext, session: ActiveSession): Prom
   return context.notify(methods.agent.session.cancel, { sessionId: session.sessionId });
 }
 
-/** Sends one prompt and collects the reply text chunks until the turn stops. */
+/**
+ * Sends one prompt and collects the reply text chunks until the turn stops. `onChunk`, if given,
+ * is told about each chunk as it arrives, so that a test can act in the middle of a reply.
+ */
 export async function runTurn(
   session: ActiveSession,
   prompt: string,
+  onChunk: (chunk: string) => void = () => {},
 ): Promise<{ chunks: string[]; stopReason: StopReason }> {
   const chunks: string[] = [];
   const finished = session.prompt(prompt);
@@ -112,6 +116,7 @@ export async function runTurn(
     const { update } = message;
     if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
       chunks.push(update.content.text);
+      onChunk(update.content.text);
     }
   }
 }

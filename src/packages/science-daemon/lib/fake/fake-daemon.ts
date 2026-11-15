@@ -261,6 +261,9 @@ class FakeDaemon implements FakeScienceDaemon {
       return this.#conversations.start(projectId, JSON.parse(await readBody(request)));
     }
     if (target === "GET frames/") return this.#conversations.frame(decodeURIComponent(id));
+    if (target === "GET frames/messages") {
+      return this.#conversations.messages(decodeURIComponent(id), url.searchParams);
+    }
     if (target === "POST frames/cancel") return this.#conversations.cancel(decodeURIComponent(id));
     return { status: 404, body: { detail: `Not found: ${route}` } };
   }
