@@ -111,7 +111,11 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
-      const session: Session = { cwd: params.cwd, clientServers: params.mcpServers };
+      const session: Session = {
+        cwd: params.cwd,
+        clientServers: params.mcpServers,
+        toolCalls: new Map(),
+      };
       sessions.set(sessionId, session);
       await offerCommands(client, sessionId);
       return { sessionId, ...(await optionsOf(session).catch(rethrowAsRequestError)) };
@@ -158,6 +162,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         const session = sessions.get(sessionId) ?? {
           cwd: params.cwd,
           clientServers: params.mcpServers,
+          toolCalls: new Map(),
           conversationId,
           ...(await science.conversationSettings(conversationId)),
         };

@@ -152,12 +152,27 @@ on the user's computer, or a question.
 - `GET /frames/<id>/messages?from=<n>&limit=<n>` returns `{ frame_id, from, total, messages }`.
   A message has `role` (`user` or `assistant`) and `content`. **[live]**
 - `content` is an array of blocks, or for some user messages a plain string. **[live]**
-- Blocks seen: `{ type: "text", text }` **[live]**, and in conversations that used tools
-  `tool_use` (`id`, `name`, `input` with a `human_description`), `tool_result`, `thinking`,
-  `image`. The tool blocks were seen in stored data, not fetched by us over this call. **[web]**
+- Blocks seen, all **[live]**: `text`, `thinking` (`{ thinking, signature }`; the text is
+  empty for the current models), `image`, and the tool blocks of "Tool activity" below:
+  `tool_use`, `tool_result`, `server_tool_use`, `web_search_tool_result`.
 - The daemon adds messages of its own with `role: "user"` and `_harness_notice: true` (system
   context such as a compute snapshot or skill hints). They are not something the user typed and
-  must not be shown as such. **[live]**
+  must not be shown as such. A `text` block can carry `_harness_notice: true` by itself, in a
+  user message that also holds tool results: the user did not type that either. **[live]**
+- Two more kinds of message have `role: "user"` and were not typed by the user, without being
+  marked as harness notices: one with `_rolling_summary` (a summary that stands in for a part
+  of a long transcript) and one with `_task_boundary`. Both hold a `text` block and can sit in
+  the middle of a turn. **[live]**
+- A message the user typed has `role: "user"` and as `content` a string or `text` blocks. One
+  sent through `POST /request` has `_intent_id` beside it; the first message of a conversation
+  started through `POST /projects/<id>/request` has not. **[live]** So the adapter takes a user
+  message for the user's own when it is none of the daemon's (above), holds no `tool_result`
+  block, and is a string or holds a `text` block that is not a harness notice.
+- A message keeps its `_uuid` when the daemon sends it again. `total` counts harness notices. A
+  read with `from` at or beyond the end answers 200 with no messages. Compaction removes
+  nothing: it inserts a marker message (`_compact_boundary: true`, a harness notice) and leaves
+  the messages at their indexes. **[live]** Whether a transcript can ever get shorter is not
+  known. **[open]**
 - A turn that was cancelled leaves no assistant message in the transcript. **[live]** (seen once)
 
 ## WebSocket
@@ -177,15 +192,16 @@ on the user's computer, or a question.
 
 ### Events used
 
-| `type`                 | Fields                                                                                                                                                                | Meaning                                                                                                                        | Status     |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| `frame_update`         | `root_frame_id`, `frame_id`, `status`, `agent_name`, `name`, `has_pending_input?`, `pending_input_requests?`, ...                                                     | A frame changed. Sent often, also for metadata-only changes.                                                                   | **[live]** |
-| `text_chunk`           | `root_frame_id`, `frame_id`, `block_type` (`"text"` or `"thinking"`), `chunk`                                                                                         | Next piece of the reply or of the reasoning. Chunks are coarse (often a whole short reply) and `chunk` may be an empty string. | **[live]** |
-| `text_reset`           | `root_frame_id`, `frame_id`                                                                                                                                           | Discard text streamed so far for this frame; the reply restarts.                                                               | **[web]**  |
-| `frame_activity`       | `root_frame_id`, `frame_id`, `phase` (`llm_call`, `tool_stream`, `tool_exec`, `llm_retry`, `verifying`, `usage_limit_paused`), `tool_name?`, `tool_id?`, `iteration?` | What the agent is doing right now.                                                                                             | **[live]** |
-| `frame_messages_delta` | `root_frame_id`, `frame_id`, `base_idx`, `appended` (messages or null)                                                                                                | Messages were appended to the transcript.                                                                                      | **[live]** |
-| `tool_stdout_chunk`    | `root_frame_id`, ...                                                                                                                                                  | Output of a running tool.                                                                                                      | **[web]**  |
-| `rate_limit_notice`    | `root_frame_id`, ...                                                                                                                                                  | The reply is paused by a usage limit.                                                                                          | **[web]**  |
+| `type`                  | Fields                                                                                                                                                                                             | Meaning                                                                                                                        | Status     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| `frame_update`          | `root_frame_id`, `frame_id`, `status`, `agent_name`, `name`, `has_pending_input?`, `pending_input_requests?`, ...                                                                                  | A frame changed. Sent often, also for metadata-only changes.                                                                   | **[live]** |
+| `text_chunk`            | `root_frame_id`, `frame_id`, `block_type` (`"text"` or `"thinking"`), `chunk`                                                                                                                      | Next piece of the reply or of the reasoning. Chunks are coarse (often a whole short reply) and `chunk` may be an empty string. | **[live]** |
+| `text_reset`            | `root_frame_id`, `frame_id`                                                                                                                                                                        | Discard text streamed so far for this frame; the reply restarts.                                                               | **[web]**  |
+| `frame_activity`        | `root_frame_id`, `frame_id`, `phase` (`llm_call`, `tool_stream`, `tool_exec`, `llm_retry`, `verifying`, `usage_limit_paused`), `tool_name?`, `tool_id?`, `is_server?`, `tool_count?`, `iteration?` | What the agent is doing right now. See "Tool activity".                                                                        | **[live]** |
+| `frame_messages_delta`  | `root_frame_id`, `frame_id`, `base_idx`, `appended` (messages or null)                                                                                                                             | The transcript changed from index `base_idx` on. See "Tool activity".                                                          | **[live]** |
+| `tool_stdout_chunk`     | `root_frame_id`, `frame_id`, `tool_use_id`, `data`                                                                                                                                                 | Output of a running code tool, as it is printed. Not used.                                                                     | **[live]** |
+| `execution_cell_update` | `root_frame_id`, `frame_id`, `tool_use_id`, `phase` (`start`, `done`), ...                                                                                                                         | A code cell started or ended; `done` carries `exit_code`, `stdout`, `stderr`. Not used.                                        | **[live]** |
+| `rate_limit_notice`     | `root_frame_id`, ...                                                                                                                                                                               | The reply is paused by a usage limit.                                                                                          | **[web]**  |
 
 ### Turn lifecycle
 
@@ -202,8 +218,9 @@ Observed order for one turn of a conversation whose frame id is `R`, all **[live
 2. `frame_update` for `R` with `status: "processing"`. **This can arrive before the HTTP response
    to step 1**, so start listening before sending.
 3. `frame_activity` with `phase: "llm_call"`, then `text_chunk` events for `R`.
-4. `frame_messages_delta` events as messages are committed.
-5. `frame_update` for `R` with a terminal status (`completed`, `cancelled`, ...).
+4. For each round of tool use, the events of "Tool activity", then step 3 again.
+5. `frame_messages_delta` events as messages are committed.
+6. `frame_update` for `R` with a terminal status (`completed`, `cancelled`, ...).
 
 Rules that follow from what was observed:
 
@@ -216,6 +233,72 @@ Rules that follow from what was observed:
   then accepts further messages through `POST /request`.
 - Events of sub-agent frames are expected to carry the conversation's `root_frame_id` with their
   own `frame_id`. **[web]**
+
+## Tool activity
+
+What the daemon reports while the assistant uses tools. Observed on a passive socket during
+real turns and in the transcripts of 120 conversations, so **[live]** unless marked.
+
+- **Blocks.** A tool use is a block of an assistant message: `{ type: "tool_use", id, name,
+  input }`. `input` holds the tool's arguments and, for nearly every use, `human_description`:
+  what the tool is doing, in words for the user, typically 30 to 45 characters. Its result is
+  a block of the user message that follows: `{ type: "tool_result", tool_use_id, content,
+  is_error? }`, where `content` is a string, mostly JSON. The web client's schema also allows
+  an array of `{ type, text }`. **[web]**
+- **Several at once.** One assistant message can hold text and then several `tool_use` blocks.
+  All their results are in the one user message that follows, not always in the same order:
+  match by `tool_use_id`.
+- **Server tools.** `web_search` runs on the model's side: `{ type: "server_tool_use", id,
+  name, input: { query } }`, with no `human_description`. Its result is in the same assistant
+  message: `{ type: "web_search_tool_result", tool_use_id, content }`, where `content` is an
+  array of `{ type: "web_search_result", title, url, ... }` or an error, `{ type:
+  "web_search_tool_result_error", error_code }`.
+- **Result shapes.** Code tools (`python`, `bash`, `repl`, ...) answer `{ stdout, stderr,
+  exit_code, ... }`. A tool that could not run answers `{ error }`. Others answer JSON of their
+  own or plain text. A code tool sent to the background answers `{ status: "running", exec_id,
+  message }` at once.
+- **Failure.** The web client shows a tool use as failed when `is_error` is true, when the
+  content is JSON `{ error }` without `stdout` or `stderr`, when a code tool's `exit_code` is
+  not 0, or when a server tool's content has a `type` that ends in `_error`. **[web]** `is_error`
+  is absent on most results, also on some that failed by these rules.
+- **Events of one round**, in order, for a conversation `R`:
+  1. `frame_activity` with `phase: "tool_stream"`, `tool_name` and `tool_id`, once for each
+     tool use, while the model writes it. `tool_id` is the `id` the block will have.
+  2. `frame_activity` with `phase: "tool_exec"`.
+  3. `frame_messages_delta` whose `appended` holds the assistant message with the `tool_use`
+     blocks. Only now are the input and the description known: between 0.2 s and several
+     minutes after step 1.
+  4. `frame_messages_delta` with the assistant message and an empty user message (`content:
+     []`), which then fills up: a further delta whenever a tool has ended, each holding the
+     user message with the results so far.
+  5. `frame_activity` with `phase: "llm_call"` for the next model call.
+- **A delta replaces, it does not append.** `appended` holds complete messages, and the
+  transcript from index `base_idx` on is now exactly those. Deltas overlap earlier ones, and
+  the same delta is often sent twice. A reader that only looks for blocks has to tell the
+  ones it has seen by their `id`.
+- `appended: null` tells the web client to forget the transcript and read it again over HTTP.
+  **[web]** Never seen. The adapter ignores it.
+- **A tool use that is named and never recorded.** On `frame_activity` with `phase:
+  "llm_retry"` the web client forgets the tool uses that `tool_stream` named during the model
+  call that is tried again: they will not be recorded. **[web]** Not seen. The adapter ends
+  them as failed, and does the same at the end of a turn for a use that was named and never
+  recorded. A use that was recorded and has no result when the turn ends is ended with the
+  turn: as failed when the turn failed or was cancelled, as completed when it completed. One
+  stored conversation that failed ends with such a `tool_use`. **[live]** A turn that ends to
+  wait for the user leaves its tool uses open.
+- **A tool sent to the background** has its result at once (`status: "running"`), so the
+  adapter reports it as ended and not failed while its code runs on. The web client shows it
+  as backgrounded until `_async_exec[<tool use id>].status` of the message that holds the
+  result says `completed`, `errored` or `interrupted`; the adapter does not follow that.
+- Not used: `tool_stdout_chunk` and `execution_cell_update` (see "Events used"), and the
+  `latest_tool_block`, `message_count` and `running_executions` fields of `frame_update`.
+- **Sub-agents.** A sub-agent runs in a child frame (`parent_frame_id` set, `root_frame_id` the
+  conversation), started from the code of a `repl` tool use; the parent frame's
+  `context_data._sdk_child_spawn_tid` maps child frame to tool use. Hidden child frames
+  (`is_hidden: true`, `agent_name: "REVIEWER"`) check the work and are no sub-agents to the
+  user. Which events the daemon sends for a child frame is not known: `frame_activity` and
+  `text_chunk` were seen for a hidden one, nothing else. **[open]** The adapter shows the
+  tool use that starts sub-agents like any other and nothing of what they do.
 
 ## Recovery
 
@@ -251,8 +334,8 @@ there is none. The fake daemon behaves as described here.
   - A reply's text is the concatenation of the `text` of its content blocks of
     `type: "text"`, and equals what `text_chunk` events with `block_type: "text"` streamed.
   - A message appears in the transcript once it is complete, not while it is streamed. The fake
-    commits a reply as one assistant message when the turn ends, so text missed in a gap arrives
-    at the end of the turn.
+    commits reply text when the turn ends, or with the tool uses that follow it, so text missed
+    in a gap arrives at the end of the turn.
   - By the time the daemon has accepted a message (the HTTP response has arrived), the user's
     message is in the transcript and the frame's status is that of the new turn, so a terminal
     status read afterwards means this turn has ended.
@@ -264,6 +347,12 @@ there is none. The fake daemon behaves as described here.
 
   In a turn with several assistant messages (tool use), only the last one is read this way: text
   of earlier messages that was streamed during or after the gap is not delivered.
+
+  Tool activity does not depend on streamed events in the same way. Every read of the transcript
+  also yields the tool uses and results of the messages since the user's last one, and a
+  `frame_messages_delta` carries complete messages, so deltas are used after a gap as before it.
+  Reasoning text is passed on after a gap as well: its pieces continue nothing that was
+  delivered, and what was streamed during the gap is lost.
 
 ### What the adapter does when the daemon is silent
 
@@ -300,19 +389,24 @@ Nothing in this section was observed on the real daemon; the fake daemon invente
 7. What a restarted daemon makes of a turn it was running: whether the frame stays `processing`,
    and whether the conversation then takes a further message. The adapter keeps following such a
    turn until its status changes or the user cancels. **[open]**
-8. The shape of a message's content blocks, when a streamed message enters the transcript, and
-   how the text of a turn with several assistant messages relates to its `text_chunk` events.
-   See "Recovery". **[open]**
+8. When a streamed message enters the transcript, and how the text of a turn with several
+   assistant messages relates to its `text_chunk` events. See "Recovery". **[open]**
 9. What the daemon answers to `POST /request` for a conversation whose turn is still `processing`.
    This can happen after a cancel that was not confirmed in time or could not be delivered. The
    fake refuses it with 400. **[open]**
 10. Assumptions the adapter makes about listing and loading that were not all observed: the frame
     list is a bare JSON array and `limit=1000` is accepted (both seen live for small projects);
     every listed frame has `id`, `name` and `updated_at` as non-empty strings; `GET
-    /frames/<unknown id>/messages` answers 404; a `tool_use` block carries `id`, `name` and
-    `input.human_description`; `POST /projects` accepts a name that is already taken. **[open]**
+    /frames/<unknown id>/messages` answers 404; `POST /projects` accepts a name that is already
+    taken. **[open]**
 11. `model` and `effort` on messages: a new conversation takes both (`POST
     /projects/<id>/request`), and the frame then reports them. A further message through `POST
     /request` changes the model but leaves the effort as it was; `POST /frames/<id>/message`
     changed neither. **[live]** How the web client changes the effort of a running conversation,
     if it can, is unknown. **[open]**
+12. Tool activity not observed: the events of a sub-agent's frame, a delta with `appended: null`,
+    whether a `server_tool_use` is ever committed before its result, and a tool sent to the
+    background while it runs on. Reasoning: every `text_chunk` with `block_type: "thinking"`
+    seen live had an empty `chunk`, and whether a model that does send reasoning text sends it
+    there is not known. A `thinking` block with `_progress_update: true` is a progress note the
+    web client shows as text; the adapter does not. **[open]**

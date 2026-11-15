@@ -154,6 +154,80 @@ describe("loading a listed conversation", () => {
     ]);
   });
 
+  it("leaves out the summaries and marks the daemon files as the user's", async () => {
+    const history = await replayOf([
+      { role: "user", content: "What is the fold of GFP?" },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Summary so far: the user asked about GFP." }],
+        marks: { _rolling_summary: { id: "summary-1" } },
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "A new task starts here." }],
+        marks: { _task_boundary: true },
+      },
+      { role: "assistant", content: [{ type: "text", text: "A beta barrel." }] },
+    ]);
+
+    expect(history).toEqual([userText("What is the fold of GFP?"), replyText("A beta barrel.")]);
+  });
+
+  it("replays a web search as a tool call, and leaves out what it found", async () => {
+    const history = await replayOf([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "server_tool_use",
+            id: "srvtoolu_search",
+            name: "web_search",
+            input: { query: "GFP fold" },
+          },
+          { type: "web_search_tool_result", tool_use_id: "srvtoolu_search", content: [] },
+          { type: "text", text: "A beta barrel." },
+        ],
+      },
+    ]);
+
+    expect(history).toEqual([
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "srvtoolu_search",
+        title: "web_search",
+        status: "completed",
+      },
+      replyText("A beta barrel."),
+    ]);
+  });
+
+  it("leaves out the notices the daemon puts next to tool results", async () => {
+    const history = await replayOf([
+      { role: "user", content: "What does this gel show?" },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_gel", name: "read_image", input: {} }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_gel", content: "Two bands." },
+          { type: "text", text: "Kernel restarted.", _harness_notice: true },
+        ],
+      },
+    ]);
+
+    expect(history).toEqual([
+      userText("What does this gel show?"),
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu_gel",
+        title: "read_image",
+        status: "completed",
+      },
+    ]);
+  });
+
   it("replays a history longer than one page of the transcript completely", async () => {
     const transcript: ExistingMessage[] = [];
     for (let exchange = 1; exchange <= 130; exchange++) {

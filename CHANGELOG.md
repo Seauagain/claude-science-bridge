@@ -29,6 +29,12 @@ All notable changes to this project are recorded here. The format follows
   a form in a client that offers forms, as a permission request in any other. A conversation
   that is still waiting for an answer no longer fails the next message with "Please answer the
   pending question(s)": the question comes up first.
+- The tools Claude Science uses during a turn show in the client as tool calls: pending under
+  the tool's name while the call is written, in progress with Claude Science's description and
+  the tool's input once it runs, and completed or failed with what the tool gave back. Reasoning
+  is passed on as thoughts when Claude Science sends any. The history of a conversation now
+  includes its web searches and no longer shows the notices Claude Science puts next to tool
+  results as something the user typed.
 - `csbridge link --all <folder>` creates a linked sub-folder for every project, with folder names
   that are valid on macOS, Linux and Windows.
 - `csbridge t3-import <folder>` brings every project and conversation into T3 Code in one go: a

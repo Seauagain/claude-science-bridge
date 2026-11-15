@@ -6,6 +6,8 @@ export type {
   ExistingConversation,
   ExistingMessage,
   FakeConversation,
+  FakeTool,
+  FakeToolUse,
   FakeTurn,
   ReplyScript,
 } from "./lib/fake/fake-conversation.ts";

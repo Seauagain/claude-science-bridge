@@ -14,8 +14,10 @@ import {
   messagesPage,
   type StoredConversation,
   type StoredMessage,
+  servedMessage,
   TIMESTAMP,
 } from "./stored-conversation.ts";
+import { beginToolRound } from "./tool-round.ts";
 
 interface Conversation extends StoredConversation {
   /** The messages sent to the conversation, as {@link FakeConversation.messages} reports them. */
@@ -310,6 +312,14 @@ export class FakeConversations {
     const cancelled = new Promise<void>((resolve) => {
       announceCancelled = resolve;
     });
+    /** Says that the transcript from `baseIndex` on is what it now is. */
+    const announce = (baseIndex: number) => {
+      this.#emit(conversation, {
+        type: "frame_messages_delta",
+        base_idx: baseIndex,
+        appended: conversation.transcript.slice(baseIndex).map(servedMessage),
+      });
+    };
     const finish = (status: string, description?: string) => {
       if (finished) return;
       finished = true;
@@ -318,8 +328,11 @@ export class FakeConversations {
       // cancelled. The fake drops them with the turn.
       conversation.pendingRequests = [];
       conversation.resumeTurn = undefined;
-      if (reply !== "") conversation.transcript.push(textMessage("assistant", reply));
-      this.#emit(conversation, { type: "frame_messages_delta", base_idx: 0, appended: null });
+      // A cancelled turn leaves no assistant message behind. See docs/protocol.md.
+      if (reply !== "" && status !== "cancelled") {
+        conversation.transcript.push(textMessage("assistant", reply));
+        announce(conversation.transcript.length - 1);
+      }
       this.#setStatus(conversation, status, description);
     };
     const turn: FakeTurn = {
@@ -333,6 +346,17 @@ export class FakeConversations {
       reasoningText: (chunk) => {
         if (finished) return;
         this.#emit(conversation, { type: "text_chunk", block_type: "thinking", chunk });
+      },
+      useTools: (tools) => {
+        if (finished) return [];
+        const spoken = reply;
+        reply = "";
+        return beginToolRound(tools, spoken, {
+          emit: (event) => this.#emit(conversation, event),
+          transcript: conversation.transcript,
+          announce,
+          finished: () => finished,
+        });
       },
       ask: (requests) =>
         new Promise((resolve) => {

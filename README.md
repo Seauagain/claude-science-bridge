@@ -5,8 +5,9 @@ Chat with Claude Science from the agent UI you already work in.
 > **Unofficial.** This project is not affiliated with, endorsed by, or supported by Anthropic.
 > "Claude" and "Claude Science" are trademarks of Anthropic.
 
-**Status: early.** The adapter works for plain-text conversations and is tested against Claude
-Science 0.1.53. It relies on the Claude Science daemon's internal, undocumented interface, which
+**Status: early.** The adapter works for conversations in text and is tested against Claude
+Science 0.1.53. Showing tool use is built on what was observed of that version, and has not yet
+been seen working in a client from end to end. It relies on the Claude Science daemon's internal, undocumented interface, which
 can change with any Claude Science update.
 
 ## What it does
@@ -18,6 +19,7 @@ other agents:
 
 - A thread in the client is a conversation in Claude Science. Replies stream in as they are
   written; further prompts continue the same conversation; a reply can be stopped.
+- The tools Claude Science uses show up in the thread as tool calls, as they start and end.
 - A local folder is linked to a Claude Science project. Threads opened in that folder, or in any
   folder below it, become conversations in that project, so the client's "project, then threads"
   sidebar mirrors "project, then conversations".
@@ -144,8 +146,24 @@ to get a `csbridge` command.
 
 - **Text only.** Prompts are sent as text; linked files are sent as their address. Images and
   other attachments are refused with a message.
-- **Only the reply text is shown.** Reasoning, tool activity and sub-agent activity are not shown
-  in the client yet. Open the conversation in Claude Science to see them.
+- **Tool use is shown as tool calls.** Each tool Claude Science uses appears in the thread when
+  Claude Science starts to write the call, under the tool's name. Once the tool runs, the call
+  is titled with what it is doing, in Claude Science's words ("Fitting the dose-response
+  curve"), and holds the tool's input: the code, the query, the file. When the tool ends, the
+  call is marked completed or failed and holds what the tool gave back; for code, what it
+  printed. The output appears when the tool has ended, not while it runs. A tool that Claude
+  Science sends to the background is marked completed at once, with Claude Science's note that
+  it is still running as its output; how it ends later is not shown. A tool that was still
+  running when a reply failed or was stopped in Claude Science is marked failed.
+- **In T3 Code, look under "Worked for ...".** As read from the program code of T3 Code 0.1.9,
+  not yet seen on screen: T3 Code shows tool calls while a reply runs and
+  folds them under one "Worked for ..." row when it is finished; click the row to see them, and
+  a call to see its input and output. If no tool calls show at all, check Settings, Activity,
+  "Tool calls in chat".
+- **Reasoning is shown when Claude Science sends any.** With the models it was observed with it
+  sent none, so there was nothing to show.
+- **Sub-agents are not shown.** The tool call that starts sub-agents is shown like any other,
+  but not what the sub-agents do. Open the conversation in Claude Science to see that.
 - **Claude Science's approvals come up in the client.** When Claude Science asks for an
   approval, for example of access to a folder on your computer, the client asks you, with the
   choices Claude Science gives, and the reply goes on with your answer. A client that can show
@@ -182,8 +200,9 @@ Science by itself:
 - The event connection is pinged. When it drops, or stops answering, the adapter opens a new one,
   waiting a little longer after each failed attempt. A reply that was being streamed goes on: text
   sent in the meantime is fetched from the conversation, once, and may arrive only when the reply
-  is finished. In a reply that uses tools, text written before the last tool call can be missing
-  in the client after such a gap; it is still in Claude Science.
+  is finished. Tool calls of the meantime show up late in the same way. In a reply that uses
+  tools, text written before the last tool call can be missing in the client after such a gap;
+  it is still in Claude Science.
 - When Claude Science stays away for more than a minute, running replies end with an error that
   says so. The adapter keeps running: once Claude Science is back, the next prompt in the same
   session works again, even when it now listens on another port.
@@ -220,7 +239,8 @@ For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in C
 
 - [x] Adapter: new conversations, streamed replies, follow-ups, cancel, recovery
 - [x] `csbridge projects`, `csbridge link`, `csbridge doctor`
-- [ ] Reasoning, tool activity and sub-agent activity in the client
+- [x] Tool calls and reasoning in the client
+- [ ] Sub-agent activity and the live output of running tools in the client
 - [x] Approvals in the client
 - [x] Model and effort selection
 - [ ] Attachments

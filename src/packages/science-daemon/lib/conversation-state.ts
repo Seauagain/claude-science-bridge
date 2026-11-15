@@ -1,5 +1,6 @@
 import type { DaemonHttp } from "./http.ts";
 import { type InputRequest, parseInputRequests } from "./input-requests.ts";
+import { type ToolActivity, turnToolActivity } from "./tool-activity.ts";
 import { readMessages } from "./transcript.ts";
 import { expectArray, expectRecord, expectString, isRecord, type JsonRecord } from "./validate.ts";
 
@@ -14,6 +15,8 @@ export interface ConversationState {
    * user's message, that is, while no reply to it has been committed.
    */
   readonly replyText: string;
+  /** The tool uses and results the transcript holds since the user's last message. */
+  readonly toolActivity: ToolActivity;
   /** What the conversation is waiting for the user to approve or answer. Mostly nothing. */
   readonly inputRequests: readonly InputRequest[];
 }
@@ -38,10 +41,16 @@ export async function readConversationState(
   const status = expectString(frame, "status", frameCall);
   const description = frame.status_description;
   const inputRequests = inputRequestsOf(frame);
-  const replyText = closingReplyText(await readMessages(http, conversationId));
+  const messages = await readMessages(http, conversationId);
+  const state = {
+    status,
+    replyText: closingReplyText(messages),
+    toolActivity: turnToolActivity(messages),
+    inputRequests,
+  };
   return typeof description === "string" && description !== ""
-    ? { status, statusDescription: description, replyText, inputRequests }
-    : { status, replyText, inputRequests };
+    ? { ...state, statusDescription: description }
+    : state;
 }
 
 /**
