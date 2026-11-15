@@ -111,6 +111,10 @@ class FakeDaemon implements FakeScienceDaemon {
     this.#conversations.queueScript(script);
   }
 
+  endTurnsOnCancel(end: boolean): void {
+    this.#conversations.endTurnsOnCancel(end);
+  }
+
   conversations(): FakeConversation[] {
     return this.#conversations.list();
   }

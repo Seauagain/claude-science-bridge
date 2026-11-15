@@ -16,8 +16,8 @@ export interface FakeTurn {
   /** Ends the turn as failed, with the reason the daemon would report. */
   fail(description: string): void;
   /**
-   * Resolves when the turn is cancelled through `POST /frames/<id>/cancel`. A script that awaits
-   * it keeps the reply running until then.
+   * Resolves when a cancel is requested for the turn through `POST /frames/<id>/cancel`. A script
+   * that awaits it keeps the reply running until then.
    */
   readonly cancelled: Promise<void>;
 }
@@ -68,11 +68,17 @@ export class FakeConversations {
   readonly #cancelRequests: string[] = [];
   /** Callers of {@link nextTranscriptRead} that are still waiting. */
   readonly #awaitingTranscriptRead: (() => void)[] = [];
+  #endingTurnsOnCancel = true;
   readonly #broadcast: (event: JsonRecord) => void;
 
   /** `broadcast` pushes an event to every open event socket. */
   constructor(broadcast: (event: JsonRecord) => void) {
     this.#broadcast = broadcast;
+  }
+
+  /** While false, a cancel is answered as usual but leaves the running turn to its script. */
+  endTurnsOnCancel(end: boolean): void {
+    this.#endingTurnsOnCancel = end;
   }
 
   queueScript(script: ReplyScript): void {
@@ -253,7 +259,7 @@ export class FakeConversations {
       cancelled,
     };
     conversation.cancelTurn = () => {
-      finish("cancelled");
+      if (this.#endingTurnsOnCancel) finish("cancelled");
       announceCancelled();
     };
 

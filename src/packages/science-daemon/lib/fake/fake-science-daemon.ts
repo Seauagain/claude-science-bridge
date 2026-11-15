@@ -38,6 +38,13 @@ export interface FakeScienceDaemon {
   addProject(name: string, options?: { readonly archived?: boolean }): string;
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
   onNextMessage(script: ReplyScript): void;
+  /**
+   * Makes a cancel end the running turn with status `cancelled` (the default) or, while false,
+   * only be acknowledged: the daemon answers the cancel as usual and the reply script's
+   * `cancelled` resolves, but the turn runs on until the script ends it, if it ever does. This
+   * stands for a daemon that is slow to stop a reply or fails to; nothing like it was observed.
+   */
+  endTurnsOnCancel(end: boolean): void;
   /** Every conversation started so far, oldest first. */
   conversations(): FakeConversation[];
   /**

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DaemonAccess } from "./access.ts";
+import { unlessCancelled } from "./cancellation.ts";
 import { readConversationState } from "./conversation-state.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
@@ -29,17 +30,21 @@ export interface ScienceDaemon {
   listProjects(): Promise<Project[]>;
   /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
+   * Aborting `cancel` stops the reply: see {@link Turn.events}.
    *
-   * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached.
+   * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached, and
+   *   with kind `cancelled` when `cancel` was aborted before the message was sent. The message
+   *   is then not sent at all, and the rejection does not wait for the connection.
    */
-  startConversation(projectId: string, message: string): Promise<Turn>;
+  startConversation(projectId: string, message: string, cancel: AbortSignal): Promise<Turn>;
   /**
    * Sends a further message to an existing conversation, and with it starts the next turn.
-   * The conversation's previous turn must have ended.
+   * The conversation's previous turn must have ended. Aborting `cancel` stops the reply: see
+   * {@link Turn.events}.
    *
-   * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached.
+   * @throws ScienceDaemonError as {@link ScienceDaemon.startConversation} does.
    */
-  sendMessage(conversationId: string, message: string): Promise<Turn>;
+  sendMessage(conversationId: string, message: string, cancel: AbortSignal): Promise<Turn>;
   /**
    * Closes the connection for good and stops every attempt to restore it. Turns still running
    * stop producing events.
@@ -91,14 +96,15 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   const http = createDaemonHttp(access);
   const me = expectRecord(await http.get("/me"), "GET /me");
   const socket = await openDaemonSocket(access, expectString(me, "user_id", "GET /me"), timing);
+  const channel: TurnChannel = { http, socket, cancelTimeoutMs: timing.cancelTimeoutMs };
 
   return {
     async listProjects() {
       await socket.ready();
       return listProjects(http);
     },
-    startConversation: (projectId, message) =>
-      startTurn(http, socket, async () => {
+    startConversation: (projectId, message, cancel) =>
+      startTurn(channel, cancel, async () => {
         const call = "POST /projects/<id>/request";
         const response = expectRecord(
           await http.post(`/projects/${encodeURIComponent(projectId)}/request`, {
@@ -108,8 +114,8 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
         );
         return expectString(response, "root_frame_id", call);
       }),
-    sendMessage: (conversationId, message) =>
-      startTurn(http, socket, async () => {
+    sendMessage: (conversationId, message, cancel) =>
+      startTurn(channel, cancel, async () => {
         const frameCall = "GET /frames/<id>";
         const frame = expectRecord(
           await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
@@ -129,18 +135,28 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
   };
 }
 
+/** What sending a message and following its turn needs of the connection. */
+interface TurnChannel {
+  readonly http: DaemonHttp;
+  readonly socket: DaemonSocket;
+  /** See {@link ConnectionTiming.cancelTimeoutMs}. */
+  readonly cancelTimeoutMs: number;
+}
+
 /**
  * Sends a message and follows the turn it starts. `send` resolves, once the daemon has accepted
- * the message, to the identifier of the conversation it went to.
+ * the message, to the identifier of the conversation it went to. Aborting `cancel` stops the
+ * turn.
  */
 async function startTurn(
-  http: DaemonHttp,
-  socket: DaemonSocket,
+  { http, socket, cancelTimeoutMs }: TurnChannel,
+  cancel: AbortSignal,
   send: () => Promise<string>,
 ): Promise<Turn> {
   // A turn cannot be followed without the socket, and after a long outage only reopening it
-  // finds out where the daemon is now.
-  await socket.ready();
+  // finds out where the daemon is now. That can take a while: a caller that cancels meanwhile
+  // is answered at once, and its message is not sent.
+  await unlessCancelled(cancel, socket.ready());
   // The turn's first events can arrive before the response that accepts the message, and for a
   // new conversation before its identifier is known. So listen first, and hand what arrived to
   // the turn once the message is accepted.
@@ -152,30 +168,17 @@ async function startTurn(
 
   try {
     const conversationId = await send();
-    const tracker = new TurnTracker(conversationId, stopListening, () =>
-      readConversationState(http, conversationId),
-    );
+    const tracker = new TurnTracker(conversationId, cancel, {
+      release: stopListening,
+      readState: () => readConversationState(http, conversationId),
+      requestCancel: () => http.post(`/frames/${encodeURIComponent(conversationId)}/cancel`),
+      cancelTimeoutMs,
+    });
     for (const signal of buffered) tracker.accept(signal);
     deliver = (signal) => tracker.accept(signal);
-    return followedTurn(http, conversationId, tracker);
+    return { conversationId, events: tracker.events };
   } catch (error) {
     stopListening();
     throw error;
   }
-}
-
-/** The turn that `tracker` follows, as the package's callers see it. */
-function followedTurn(http: DaemonHttp, conversationId: string, tracker: TurnTracker): Turn {
-  return {
-    conversationId,
-    events: tracker.events,
-    cancel() {
-      if (tracker.ended) return;
-      // Not awaited: the daemon confirms through the turn's events, and a caller reacting to the
-      // user's cancel has nobody to hand a failure to except whoever reads those events.
-      http
-        .post(`/frames/${encodeURIComponent(conversationId)}/cancel`)
-        .catch((error: unknown) => tracker.fail(error));
-    },
-  };
 }
