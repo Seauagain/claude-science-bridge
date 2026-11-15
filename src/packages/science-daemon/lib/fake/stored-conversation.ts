@@ -9,6 +9,8 @@ export interface StoredMessage {
   readonly content: string | readonly JsonRecord[];
   /** True for a message the daemon added itself, which it marks `_harness_notice`. */
   readonly harnessNotice?: boolean;
+  /** Further fields the daemon keeps with the message, such as `_rolling_summary`. */
+  readonly marks?: JsonRecord;
 }
 
 /** What the fake daemon stores about one conversation: its frame and its transcript. */
@@ -102,20 +104,30 @@ export function messagesPage(conversation: StoredConversation, query: URLSearchP
   const limit = Number.parseInt(query.get("limit") ?? "", 10);
   if (!(from >= 0 && limit > 0)) return undocumented("from or limit is missing");
 
-  const page = conversation.transcript.slice(from, from + limit).map((message) => ({
-    role: message.role,
-    content: message.content,
-    ...(message.harnessNotice ? { _harness_notice: true } : {}),
-    _uuid: randomUUID(),
-    _ts: TIMESTAMP,
-  }));
   return {
     status: 200,
     body: {
       frame_id: conversation.id,
       from,
       total: conversation.transcript.length,
-      messages: page,
+      messages: conversation.transcript.slice(from, from + limit).map(servedMessage),
     },
+  };
+}
+
+/**
+ * A message as the daemon serves it over HTTP and pushes it in a `frame_messages_delta`.
+ *
+ * The daemon keeps a message's `_uuid` for good. The fake makes one up each time, which no
+ * reader of docs/protocol.md depends on.
+ */
+export function servedMessage(message: StoredMessage): JsonRecord {
+  return {
+    role: message.role,
+    content: message.content,
+    ...(message.harnessNotice ? { _harness_notice: true } : {}),
+    ...message.marks,
+    _uuid: randomUUID(),
+    _ts: TIMESTAMP,
   };
 }

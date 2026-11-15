@@ -1,231 +1,258 @@
 # claude-science-bridge
 
-Chat with Claude Science from the agent UI you already work in.
+**English** | [简体中文](./README.zh-CN.md)
 
-> **Unofficial.** This project is not affiliated with, endorsed by, or supported by Anthropic.
-> "Claude" and "Claude Science" are trademarks of Anthropic.
+Use Claude Science inside T3 Code, Zed, or any other client that speaks the
+[Agent Client Protocol](https://agentclientprotocol.com), right next to your other agents.
 
-**Status: early.** The adapter works for plain-text conversations and is tested against Claude
-Science 0.1.53. It relies on the Claude Science daemon's internal, undocumented interface, which
-can change with any Claude Science update.
+> An unofficial project, not affiliated with Anthropic. "Claude" and "Claude Science" are
+> trademarks of Anthropic.
 
-## What it does
+## Why
 
-Claude Science runs as a local daemon and is used through a browser tab. `csbridge acp` is an
-[Agent Client Protocol](https://agentclientprotocol.com) agent that talks to that daemon, so any
-client that can launch a local ACP agent (T3 Code, Zed, ...) can host Claude Science next to its
-other agents:
+Claude Science lives in a browser tab of its own. If you already work with several agents in one
+window, that means switching back and forth, and your Claude Science projects sit apart from
+everything else.
 
-- A thread in the client is a conversation in Claude Science. Replies stream in as they are
-  written; further prompts continue the same conversation; a reply can be stopped.
-- A local folder is linked to a Claude Science project. Threads opened in that folder, or in any
-  folder below it, become conversations in that project, so the client's "project, then threads"
-  sidebar mirrors "project, then conversations".
+`csbridge` brings Claude Science into the window you already use:
 
-- Conversations that already exist in a project can be listed and imported as threads and
-  continued. A thread keeps working after the client restarts the adapter.
+- **Chat where your other agents are.** Start a thread, pick Claude Science, and type. Replies
+  stream in as they are written, and follow-up messages continue the same conversation.
+- **Your projects in the sidebar.** Each Claude Science project becomes a project in your client,
+  with its conversations as threads underneath.
+- **Your existing conversations come along.** One command brings every project and conversation
+  into T3 Code, with its history.
+- **See what Claude Science is doing.** Every tool it uses appears in the thread: what it is
+  doing, the code or query it ran, and what came back.
+- **Stay in control.** When Claude Science needs your approval, for example to read a folder on
+  your computer, the question comes up in your client and your answer goes back.
 
-The conversations stay in Claude Science: you can open them in its own UI at any time.
+Nothing moves out of Claude Science. Every conversation is still there, and you can open it in the
+Claude Science app whenever you like.
 
-## Requirements
+## Before you start
 
-- Node.js 22 or newer.
-- Claude Science installed, with its daemon running.
+You need:
 
-## Install
+- [Node.js](https://nodejs.org) 22 or newer.
+- Claude Science installed and running. `csbridge` works with Claude Science 0.1.53.
+
+## Get started with T3 Code
+
+### 1. Install
 
 ```sh
 git clone https://github.com/Seauagain/claude-science-bridge.git
 cd claude-science-bridge
 pnpm install
 pnpm build
+pnpm link --global
 ```
 
-The program is `dist/main.js`. The examples below call it `csbridge`; use
-`node /path/to/claude-science-bridge/dist/main.js` in its place, or run `pnpm link --global` once
-to get a `csbridge` command.
+The last line gives you the `csbridge` command. If you prefer not to link it, write
+`node /path/to/claude-science-bridge/dist/main.js` wherever this guide says `csbridge`.
 
-## Set up
+### 2. Check that everything is in place
 
-1. Check the setup:
+```
+$ csbridge doctor
+ok    Science CLI: found
+ok    Daemon: running at http://127.0.0.1:8765
+ok    Daemon version: 0.1.53, tested
+ok    Login: the daemon accepted a login link
+```
 
-   ```
-   $ csbridge doctor
-   ok    Science CLI: found
-   ok    Daemon: running at http://127.0.0.1:8765
-   ok    Daemon version: 0.1.53, tested
-   ok    Login: the daemon accepted a login link
-   warn  Project link: /work/folding is not linked to a project. Run "csbridge link --project <name>" in the folder you want to open sessions in.
-   ```
+If a line says `FAIL`, it also says what to do. Fix that and run the command again. A line that
+says `warn` is a hint and needs no action.
 
-   A failed check says what to do next and makes the exit code non-zero; a warning does not.
+### 3. Add Claude Science to T3 Code
 
-2. Link a folder to a project:
+Open T3 Code's `settings.json` and add a provider. Put in the path of your Node.js program
+(`which node` prints it) and the path of the folder you cloned:
 
-   ```
-   $ csbridge projects
-   proj_58edd193e118  Protein folding
-   $ cd /work/folding
-   $ csbridge link --project "Protein folding"
-   ```
+```json
+"providerInstances": {
+  "claudeScience": {
+    "driver": "acpRegistry",
+    "displayName": "Claude Science",
+    "enabled": true,
+    "environment": [],
+    "config": {
+      "source": "local",
+      "commandPath": "/path/to/node",
+      "commandArgs": ["/path/to/claude-science-bridge/dist/main.js", "acp"]
+    }
+  }
+}
+```
 
-   This writes `.csbridge/project.json` in the folder.
+Restart T3 Code. Claude Science now appears in the list of agents.
 
-   Linking by hand is optional. Any folder works: the first message of a thread in a folder that is
-   not linked links it to the project that has the folder's name, or to a new project of that name,
-   and says so in the thread. Run `csbridge link` to choose a different project, or when several
-   projects share the folder's name.
+### 4. Bring in your projects and conversations
 
-   To mirror all your projects at once, run `csbridge link --all ~/science-projects` (the folder
-   must exist), then add the folders it lists as projects in your ACP client. Folder names are made
-   valid on macOS, Linux and Windows; projects with the same name get their identifier appended. A
-   folder that is already linked to a different project is skipped.
+```
+$ mkdir ~/science-projects
+$ csbridge t3-import ~/science-projects
+CS-Protein folding: 12 conversations brought in
+CS-Climate model: nothing to bring in
+```
 
-   In T3 Code, step 4 below does all of this for you.
+Every Claude Science project now shows up in T3 Code as a project named `CS-<project>`, and every
+conversation as a thread that shows its earlier messages and keeps its model and effort. The
+threads arrive already settled, so they do not crowd your list of open work.
 
-3. Register the agent in your ACP client as a local command: the Node.js executable with the
-   arguments `/path/to/claude-science-bridge/dist/main.js acp`. Then start a thread in any folder.
+Run the command again whenever you like. It brings in only what is new.
 
-   In T3 Code this is a provider instance of the ACP kind with a local command. In its
-   `settings.json` it looks like this:
+### 5. Start chatting
 
-   ```json
-   "claudeScience": {
-     "driver": "acpRegistry",
-     "displayName": "Claude Science",
-     "enabled": true,
-     "environment": [],
-     "config": {
-       "source": "local",
-       "commandPath": "/path/to/node",
-       "commandArgs": ["/path/to/claude-science-bridge/dist/main.js", "acp"]
-     }
-   }
-   ```
+Open one of the `CS-` projects, start a thread with Claude Science, and send a message. The
+conversation is created in the matching Claude Science project.
 
-4. In T3 Code, bring in everything you already have with one command (step 3 first: the threads
-   are started through the provider):
+## Using it
 
-   ```
-   $ mkdir ~/science-projects
-   $ csbridge t3-import ~/science-projects
-   CS-Protein folding: 12 conversations brought in
-   CS-Climate model: nothing to bring in
-   ```
+### Starting a conversation
 
-   Every project gets a linked sub-folder and a T3 project named `CS-<project>`, and every
-   conversation gets a thread on the conversation's own model and effort. Each thread shows the earlier
-   messages and is already settled, so the import does not fill your list of finished work. Run
-   the command again whenever you like: it brings in only what is new. While it runs, T3 Code
-   shows each conversation as working for about a second: every thread is opened by a short
-   turn, which is what makes its history visible. `--prefix` changes the
-   `CS-` in front of the project names, and `--provider` names the provider instance if yours
-   is not called `claudeScience`.
+A thread started in a `CS-` project becomes a conversation in that Claude Science project.
+
+You can also start a thread in any other folder. The first message connects the folder to the
+Claude Science project of the same name, creating the project if there is none, and tells you so
+in the thread. From then on, every thread in that folder goes to that project.
+
+### Watching it work
+
+While Claude Science works, each tool it uses shows up in the thread as a tool call:
+
+- When Claude Science reaches for a tool, the call appears under the tool's name.
+- Once the tool runs, the call is titled with what it is doing, in Claude Science's own words,
+  such as "Fitting the dose-response curve". Open it to see the code, query or file it works on.
+- When the tool finishes, the call is marked completed or failed and holds what the tool gave
+  back. For code, that is what the code printed.
+
+In T3 Code, tool calls are shown live while the reply is being written. Afterwards they fold into
+a single "Worked for ..." row above the answer. Click the row to see them again, and click a call
+to see its input and output.
+
+### Answering questions
+
+When Claude Science asks for an approval or puts a question to you, your client shows it with the
+choices Claude Science offers. Pick one and the reply carries on.
+
+If you leave a question unanswered, it comes up again with your next message.
+
+Questions that need you to type something, such as a password, an API key or an email address,
+are answered in the Claude Science app. The thread tells you when one is waiting, and the reply
+continues in your client as soon as you have answered it there.
+
+### Choosing a model and effort
+
+The model and effort pickers of your client show what Claude Science offers. You can change the
+model at any time. The effort is chosen when a conversation starts and stays with it.
+
+### Picking up earlier conversations
+
+Threads brought in by `csbridge t3-import` show their history from the start. In any other
+thread, type `/history` like a message to see the conversation's earlier messages: what you
+wrote, the replies, and the tools that were used. Nothing is sent to Claude Science for it.
+
+### Stopping a reply
+
+Press stop in your client. The reply ends there, and the conversation is ready for your next
+message.
+
+## Using another ACP client
+
+Any client that can launch a local ACP agent works, Zed included. Register this command as an
+agent:
+
+```
+/path/to/node /path/to/claude-science-bridge/dist/main.js acp
+```
+
+Then start a thread in any folder. To get a folder for each of your Claude Science projects in
+one go:
+
+```
+$ mkdir ~/science-projects
+$ csbridge link --all ~/science-projects
+```
+
+Add the folders it creates as projects in your client. Existing conversations of a project can be
+imported through your client's own list of sessions for that folder.
 
 ## Commands
 
-| Command                                         | What it does                                                                                                                                                       |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `csbridge acp`                                  | Runs as an ACP agent on standard input and output. This is what the client launches.                                                                               |
-| `csbridge projects`                             | Lists your Claude Science projects.                                                                                                                                |
-| `csbridge link --project <id or name> [folder]` | Links a folder (default: the current one) to a project.                                                                                                            |
-| `csbridge link --all <folder>`                  | Creates a sub-folder of `<folder>` for every project that is not archived, named after the project and linked to it. Run it again to add folders for new projects. |
-| `csbridge t3-import <folder>`                   | T3 Code only. Links a sub-folder of `<folder>` to every project, adds each as a T3 project, and starts a settled thread for every conversation that has none.      |
-| `csbridge doctor`                               | Checks the setup and says how to fix what is wrong.                                                                                                                |
+| Command                                         | What it does                                                            |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| `csbridge doctor`                               | Checks your setup and says how to fix what is wrong.                    |
+| `csbridge t3-import <folder>`                   | Brings every project and conversation into T3 Code.                     |
+| `csbridge projects`                             | Lists your Claude Science projects.                                     |
+| `csbridge link --project <id or name> [folder]` | Connects a folder (the current one by default) to a project you choose. |
+| `csbridge link --all <folder>`                  | Creates a connected sub-folder of `<folder>` for every project.         |
+| `csbridge acp`                                  | Runs the bridge. Your client starts this for you.                       |
 
-| Setting                       | Meaning                                                                                                                                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--claude-science-bin <path>` | The `claude-science` executable to use.                                                                                                                                                           |
-| `CLAUDE_SCIENCE_BIN`          | The same, as an environment variable. Without either, `PATH` and then `bin/` in the default Claude Science data folder are tried.                                                                 |
-| `CSBRIDGE_START_COMMAND`      | The command that starts Claude Science on this machine, shown when the daemon is not running. Set it if you start Claude Science through a launcher of your own. Default: `claude-science serve`. |
-| `CSBRIDGE_STATE_DIR`          | The folder csbridge keeps its own state in: which thread belongs to which conversation, identifiers only. Default: `.csbridge` in your home folder.                                               |
+`csbridge t3-import` takes two options: `--prefix` changes the `CS-` in front of project names,
+and `--provider` names your T3 Code provider if you did not call it `claudeScience`.
 
-## What to expect
+### Settings
 
-- **Text only.** Prompts are sent as text; linked files are sent as their address. Images and
-  other attachments are refused with a message.
-- **Only the reply text is shown.** Reasoning, tool activity and sub-agent activity are not shown
-  in the client yet. Open the conversation in Claude Science to see them.
-- **Claude Science's approvals come up in the client.** When Claude Science asks for an
-  approval, for example of access to a folder on your computer, the client asks you, with the
-  choices Claude Science gives, and the reply goes on with your answer. A client that can show
-  forms (T3 Code can) is asked with a form, which always reaches you; any other client gets an
-  ACP permission request, which it may decide by its own rules without showing it. A
-  conversation that is still waiting for an answer brings the question up again with your next
-  message.
-- **Some questions can only be answered in Claude Science.** Passwords, API keys, a contact
-  email, and questions with several parts or free text are described in the thread and wait
-  there for you to answer them in the Claude Science UI; the reply then goes on in the client.
-- **Model and effort come from Claude Science.** The client's pickers show the models Claude
-  Science offers and the effort levels each takes. A model can be changed at any time; the effort
-  is taken when a conversation starts, because Claude Science keeps it for the conversation.
-- **In T3 Code, a settled thread says "This model pick was not saved".** T3 Code saves a change
-  of a thread's model only while a session is bound to the thread, and unbinds the session when
-  the thread is settled or archived. Picking a model on a thread that was settled or only
-  imported therefore shows that message. The pick stays in the composer and goes out with your
-  next message, and from then on the picker works as usual.
-- **Importing.** In T3 Code, `csbridge t3-import` brings in every project and conversation: see
-  step 4 above. In any client, the conversations of the project a folder is linked to can also
-  be imported by hand; in T3 Code that is "Native sessions" in the provider's settings.
-- **A thread imported by hand starts out empty.** T3 Code discards the history an agent replays
-  while a session is loaded. Type `/history` in the thread to see the earlier messages: what you
-  typed, the replies, and tool use as one line each. Nothing is sent to Claude Science for it.
-  Threads made by `csbridge t3-import` show their history from the start.
+| Setting                       | What it is for                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--claude-science-bin <path>` | Where the `claude-science` program is, if `csbridge` does not find it by itself.                                   |
+| `CLAUDE_SCIENCE_BIN`          | The same, as an environment variable.                                                                              |
+| `CSBRIDGE_START_COMMAND`      | The command that starts Claude Science on your machine, shown in the hint when Claude Science is not running.      |
+| `CSBRIDGE_STATE_DIR`          | Where `csbridge` remembers which thread belongs to which conversation. By default `.csbridge` in your home folder. |
 
-## When the login or the connection is lost
+## Good to know
 
-`csbridge acp` stays up for as long as the client does and looks after its connection to Claude
-Science by itself:
+- **Messages are text.** A file you link in a message is sent as its path. Images and other
+  attachments are not supported yet.
+- **Sub-agents work behind one tool call.** When Claude Science hands work to sub-agents, the
+  thread shows the tool call that starts them. Open the conversation in the Claude Science app
+  to follow what each sub-agent does.
+- **Output appears when a tool finishes.** A long-running tool shows as in progress until then.
+- **Changing the model on a finished thread in T3 Code.** T3 Code may say "This model pick was
+  not saved". Send your next message anyway: the model you picked goes out with it, and the
+  picker works as usual from then on.
+- **The bridge keeps itself connected.** If the connection to Claude Science drops, it reconnects
+  and the reply carries on. Text and tool calls from the gap arrive a little late.
 
-- When Claude Science stops accepting the login, the adapter logs in again and repeats the
-  request. You see nothing of it.
-- The event connection is pinged. When it drops, or stops answering, the adapter opens a new one,
-  waiting a little longer after each failed attempt. A reply that was being streamed goes on: text
-  sent in the meantime is fetched from the conversation, once, and may arrive only when the reply
-  is finished. In a reply that uses tools, text written before the last tool call can be missing
-  in the client after such a gap; it is still in Claude Science.
-- When Claude Science stays away for more than a minute, running replies end with an error that
-  says so. The adapter keeps running: once Claude Science is back, the next prompt in the same
-  session works again, even when it now listens on another port.
+## Troubleshooting
 
-- Claude Science gets 30 seconds to answer any single request. When it accepts the connection and
-  then says nothing, the prompt ends with an error that says so instead of waiting.
+**Something does not work.** Run `csbridge doctor` first. It checks each part of the setup and
+tells you what to do.
 
-An error that says the login could not be renewed points at the setup: run `csbridge doctor`.
+**"Claude Science is not running."** Start Claude Science, then send your message again.
 
-## Stopping a reply
+**A reply takes long to stop.** The bridge waits up to ten seconds for Claude Science to confirm,
+then ends the reply in your client either way.
 
-Stopping a reply always ends the prompt as cancelled: when Claude Science confirms, at once when it
-cannot be asked, and after 10 seconds when it took the request but did not stop. In the last two
-cases the reply may still be running in Claude Science. A prompt that is stopped before its
-message was sent is not sent at all.
+**No tool calls in T3 Code.** Open Settings, Activity, and set "Tool calls in chat" to show them.
 
-## How it works
+**A thread brought in by hand is empty.** Type `/history` in it.
 
-- The daemon listens on loopback and requires a login. The adapter obtains one the way the browser
-  does: it asks the `claude-science` program for a single-use login link and exchanges it. The
-  login is kept in memory only.
-- The adapter talks to loopback only and makes no other network request. If you force Node.js to
-  use a proxy for everything (`NODE_USE_ENV_PROXY=1`), make sure `NO_PROXY` includes `127.0.0.1`
-  and `localhost`.
-- It never reads or writes the Claude Science data folder. It keeps one file of its own,
-  `sessions.jsonl` in its state folder, holding identifiers only.
-- No Anthropic prompts, skills or other bundled assets are redistributed here.
+**Claude Science was updated.** Run `csbridge doctor`. It tells you whether your version is one
+the bridge supports, and `git pull && pnpm install && pnpm build` gets you the latest bridge.
 
-For contributors: [docs/SPEC.md](./docs/SPEC.md) (requirements and process, in Chinese),
-[docs/protocol.md](./docs/protocol.md) (what is known about the daemon's interface),
-[CONTRIBUTING.md](./CONTRIBUTING.md) and [GLOSSARY.md](./GLOSSARY.md).
+**A project name is used twice.** `csbridge` asks you to choose. Run
+`csbridge link --project <id>` in the folder, with an id from `csbridge projects`.
 
-## Roadmap
+## Your data
 
-- [x] Adapter: new conversations, streamed replies, follow-ups, cancel, recovery
-- [x] `csbridge projects`, `csbridge link`, `csbridge doctor`
-- [ ] Reasoning, tool activity and sub-agent activity in the client
-- [x] Approvals in the client
-- [x] Model and effort selection
-- [ ] Attachments
-- [x] Listing, importing and continuing existing conversations from the client
-- [ ] Exporter: projects, conversations and artifacts as plain files
+`csbridge` runs entirely on your machine and talks only to the Claude Science app on it. It logs
+in the same way the browser does and keeps that login in memory. On disk it keeps one small file
+of its own, which lists thread and conversation identifiers and none of their content.
+
+## Coming next
+
+- Attachments in messages
+- What sub-agents are doing, and the output of a tool while it runs
+- Exporting projects, conversations and artifacts as plain files
+
+## Contributing
+
+Start with [CONTRIBUTING.md](./CONTRIBUTING.md). [docs/SPEC.md](./docs/SPEC.md) describes the
+design (in Chinese), and [docs/protocol.md](./docs/protocol.md) how the bridge talks to Claude
+Science.
 
 ## License
 

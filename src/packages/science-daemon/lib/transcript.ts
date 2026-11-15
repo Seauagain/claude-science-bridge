@@ -1,12 +1,7 @@
 import type { DaemonHttp } from "./http.ts";
-import {
-  expectArray,
-  expectNumber,
-  expectRecord,
-  expectString,
-  isRecord,
-  type JsonRecord,
-} from "./validate.ts";
+import { addedByDaemon } from "./message-origin.ts";
+import { toolUseOf } from "./tool-activity.ts";
+import { expectArray, expectNumber, expectRecord, isRecord, type JsonRecord } from "./validate.ts";
 
 /**
  * One thing a conversation's transcript shows the user: text the user typed, text Claude
@@ -60,8 +55,7 @@ export async function readTranscript(
 }
 
 function entriesOf(message: JsonRecord): TranscriptEntry[] {
-  // The daemon files its own notices under the user's role. The user did not type them.
-  if (message._harness_notice === true) return [];
+  if (addedByDaemon(message)) return [];
   const { role, content } = message;
   if (role !== "user" && role !== "assistant") return [];
   const blocks =
@@ -77,19 +71,20 @@ function entriesOf(message: JsonRecord): TranscriptEntry[] {
  */
 function entryOf(role: "user" | "assistant", block: JsonRecord): TranscriptEntry[] {
   if (block.type === "text") {
+    // The daemon also puts notices of its own into a message that holds tool results.
     if (typeof block.text !== "string" || block.text === "") return [];
+    if (block._harness_notice === true) return [];
     return [{ type: role === "user" ? "user-text" : "reply-text", text: block.text }];
   }
-  if (block.type === "tool_use") {
-    const description = isRecord(block.input) ? block.input.human_description : undefined;
-    return [
-      {
-        type: "tool-use",
-        toolUseId: expectString(block, "id", MESSAGES_CALL),
-        toolName: expectString(block, "name", MESSAGES_CALL),
-        ...(typeof description === "string" && description !== "" ? { description } : {}),
-      },
-    ];
-  }
-  return [];
+  const toolUse = toolUseOf(block);
+  if (toolUse === undefined) return [];
+  const { toolUseId, toolName, description } = toolUse;
+  return [
+    {
+      type: "tool-use",
+      toolUseId,
+      toolName,
+      ...(description === undefined ? {} : { description }),
+    },
+  ];
 }

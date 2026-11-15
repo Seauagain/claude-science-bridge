@@ -3,6 +3,7 @@ import type { ConversationState } from "./conversation-state.ts";
 import { type InputRequest, parseInputRequests } from "./input-requests.ts";
 import type { DaemonEvent, SocketSignal } from "./socket.ts";
 import type { ConnectionTiming } from "./timing.ts";
+import { type ToolEvent, ToolLedger, turnToolActivity } from "./tool-activity.ts";
 
 /** How a turn ended. */
 export type TurnOutcome =
@@ -18,6 +19,10 @@ export type TurnOutcome =
 /** One thing that happened during a turn. `ended` is always the last event. */
 export type TurnEvent =
   | { readonly type: "reply-text"; readonly text: string }
+  /** A piece of the reasoning behind the reply, which is not part of the reply. */
+  | { readonly type: "reasoning-text"; readonly text: string }
+  /** What Claude Science does with its tools. Sub-agents' tool uses are not reported. */
+  | ToolEvent
   /**
    * The daemon asks the user for approvals or answers, and the turn goes on once it has them:
    * through `answerInputRequests`, or from the user in Claude Science itself. Each request is
@@ -35,8 +40,12 @@ export interface Turn {
    *
    * A connection that drops during the turn is reopened without the consumer noticing: reply
    * text is never repeated, and text that was streamed in the meantime arrives late, at the
-   * latest when the turn ends. Iteration fails with a ScienceDaemonError when the connection
-   * cannot be reopened.
+   * latest when the turn ends. Tool uses of the meantime are reported late as well, and
+   * reasoning of the meantime is lost. Iteration fails with a ScienceDaemonError when the
+   * connection cannot be reopened.
+   *
+   * Every tool use reported as started is reported as ended before the turn's end, unless the
+   * turn ends to wait for the user.
    *
    * Once the caller has aborted the `cancel` signal the message was sent with, the daemon is
    * asked to stop the reply, and the only event still to come is the end of the turn, with
@@ -104,6 +113,7 @@ export class TurnTracker {
   #cancelDeadline: NodeJS.Timeout | undefined;
   /** The input requests the consumer has been told about. */
   readonly #asked = new Set<string>();
+  readonly #tools = new ToolLedger();
 
   /**
    * Aborting `cancel` stops the turn. It may be aborted already. `pending` are input requests
@@ -164,15 +174,44 @@ export class TurnTracker {
     }
 
     if (event.type === "text_chunk") {
-      // Reasoning text (`block_type: "thinking"`) is not part of the reply.
-      const streamed = event.block_type === "text" && typeof event.chunk === "string";
-      if (streamed && !this.#eventsMissed) this.#deliver(String(event.chunk));
+      this.#acceptText(event);
     } else if (event.type === "frame_update") {
       this.#acceptStatus(event);
+    } else if (this.#started) {
+      // Before the turn has started, tool news can be left over from the previous turn.
+      this.#report(this.#toolNews(event));
     }
     // `text_reset` is left unhandled on purpose. It tells a client to discard the text streamed
     // so far because the reply starts over, and the consumer cannot do that: ACP has no way to
     // take back text the client has been sent. The restarted reply follows what was delivered.
+  }
+
+  #acceptText(event: DaemonEvent): void {
+    if (typeof event.chunk !== "string" || event.chunk === "") return;
+    if (event.block_type === "thinking") {
+      this.#queue.push({ type: "reasoning-text", text: event.chunk });
+    } else if (event.block_type === "text" && !this.#eventsMissed) {
+      // Streamed reply text continues what was delivered only while none of it was missed.
+      this.#deliver(event.chunk);
+    }
+  }
+
+  /** What an event says about the turn's tool uses that the consumer has not been told. */
+  #toolNews(event: DaemonEvent): ToolEvent[] {
+    if (event.type === "frame_activity" && event.phase === "tool_stream") {
+      return this.#tools.named(event.tool_id, event.tool_name);
+    }
+    if (event.type === "frame_activity" && event.phase === "llm_retry")
+      return this.#tools.retried();
+    // A delta's messages are complete, so they count after a gap as before it.
+    if (event.type === "frame_messages_delta" && Array.isArray(event.appended)) {
+      return this.#tools.recorded(turnToolActivity(event.appended));
+    }
+    return [];
+  }
+
+  #report(events: readonly ToolEvent[]): void {
+    for (const event of events) this.#queue.push(event);
   }
 
   #acceptStatus(event: DaemonEvent): void {
@@ -215,6 +254,7 @@ export class TurnTracker {
       .then(async () => {
         if (this.#ended) return;
         const state = await this.#connection.readState();
+        this.#report(this.#tools.recorded(state.toolActivity));
         this.#deliver(undeliveredText(this.#delivered, state.replyText));
         const outcome = OUTCOME_BY_STATUS[state.status];
         if (outcome === undefined) this.#ask(state.inputRequests);
@@ -259,6 +299,10 @@ export class TurnTracker {
   }
 
   #end(outcome: TurnOutcome, detail: unknown): void {
+    // A turn that waits for the user has a tool use open that asks, and goes on with it.
+    if (outcome !== "waiting-for-user") {
+      this.#report(this.#tools.turnEnded(outcome === "completed"));
+    }
     this.#queue.push(
       typeof detail === "string" && detail !== ""
         ? { type: "ended", outcome, detail }

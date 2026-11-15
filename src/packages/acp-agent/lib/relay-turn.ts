@@ -1,0 +1,129 @@
+import {
+  type AgentContext,
+  methods,
+  type PromptResponse,
+  RequestError,
+  type SessionUpdate,
+} from "@agentclientprotocol/sdk";
+import type { ScienceDaemon, ToolEvent, Turn } from "../../science-daemon/index.ts";
+import { INTERNAL_ERROR } from "./errors.ts";
+import { type AskingWay, askUser } from "./input-requests.ts";
+
+/**
+ * The tool calls a session has shown its client, by identifier, and whether each has ended. A
+ * turn that stopped to ask is carried on by a later prompt, which hears of the turn's tool uses
+ * once more: the client must not be told of a call twice.
+ */
+export type ShownToolCalls = Map<string, "open" | "ended">;
+
+/** What {@link relayTurn} works with besides the turn. */
+export interface RelaySurroundings {
+  /** The client to pass the turn on to. */
+  readonly client: AgentContext;
+  /** The connection to the daemon, made on first use. */
+  readonly daemon: () => Promise<ScienceDaemon>;
+  /** How this client is asked what the daemon asks the user. */
+  readonly askingWay: AskingWay;
+}
+
+/** The session a turn is passed on to. */
+export interface RelayTarget {
+  readonly sessionId: string;
+  /** The tool calls the session has shown so far. {@link relayTurn} adds the turn's. */
+  readonly toolCalls: ShownToolCalls;
+}
+
+/**
+ * Passes a turn on to the client until it ends: the reply as message text, the reasoning as
+ * thoughts, the tool uses as tool calls, and what the daemon asks the user as questions, whose
+ * answers go back to the daemon.
+ */
+export async function relayTurn(
+  turn: Turn,
+  { sessionId, toolCalls }: RelayTarget,
+  cancel: AbortSignal,
+  { client, daemon, askingWay }: RelaySurroundings,
+): Promise<PromptResponse> {
+  const show = (update: SessionUpdate) =>
+    client.notify(methods.client.session.update, { sessionId, update });
+  const say = (text: string) =>
+    show({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+
+  // Once the client has cancelled, the turn has no more events but its end, as cancelled.
+  for await (const event of turn.events) {
+    if (event.type === "reply-text") {
+      await say(event.text);
+    } else if (event.type === "reasoning-text") {
+      await show({
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: event.text },
+      });
+    } else if (event.type === "input-requested") {
+      const answers = await askUser(event.requests, sessionId, client, askingWay);
+      // The user stopped the turn while being asked: its end, as cancelled, is still to come.
+      if (cancel.aborted) continue;
+      // Left unanswered, the requests stay pending: the next prompt brings them up again.
+      if (answers === undefined) return { stopReason: "cancelled" };
+      if (answers.length > 0) {
+        const applied = await (await daemon()).answerInputRequests(turn.conversationId, answers);
+        if (!applied) {
+          await say(
+            "This was already answered in Claude Science, so the choice made here " +
+              "was not applied.\n\n",
+          );
+        }
+      }
+    } else if (event.type !== "ended") {
+      const update = toolCallUpdate(event, toolCalls);
+      if (update !== undefined) await show(update);
+    } else if (event.outcome === "failed") {
+      throw new RequestError(
+        INTERNAL_ERROR,
+        `Claude Science could not finish the reply: ${event.detail ?? "no reason given"}`,
+      );
+    } else {
+      return { stopReason: event.outcome === "cancelled" ? "cancelled" : "end_turn" };
+    }
+  }
+  throw new RequestError(INTERNAL_ERROR, "The connection to Claude Science closed mid-reply.");
+}
+
+/**
+ * The update that shows in the client what a turn reports about a tool use: a tool call that
+ * is pending while only the tool is known, in progress once it runs, and completed or failed
+ * with what the tool gave back.
+ *
+ * The call is titled with what the tool is doing, in Claude Science's words, and is given no
+ * kind. A client may title a call of a kind it knows by its own rules: T3 Code shows "Ran
+ * command" for every `execute`, which says less. Every update repeats the title, because T3
+ * Code names a call "Tool" after an update that has content and no title.
+ *
+ * Resolves to nothing for a call that `shown` has as ended, and records the call in `shown`.
+ */
+function toolCallUpdate(event: ToolEvent, shown: ShownToolCalls): SessionUpdate | undefined {
+  const { toolUseId: toolCallId, toolName, description, input } = event.toolUse;
+  const before = shown.get(toolCallId);
+  if (before === "ended") return undefined;
+  shown.set(toolCallId, event.type === "tool-ended" ? "ended" : "open");
+  const title = description ?? toolName;
+  if (event.type === "tool-ended") {
+    const { failed, output } = event;
+    return {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      title,
+      status: failed ? "failed" : "completed",
+      // Both, for the same text: T3 Code shows `rawOutput` as text and `content` as JSON.
+      ...(output === ""
+        ? {}
+        : {
+            content: [{ type: "content", content: { type: "text", text: output } }],
+            rawOutput: output,
+          }),
+    };
+  }
+  const running = input === undefined ? {} : { status: "in_progress" as const, rawInput: input };
+  return before === undefined
+    ? { sessionUpdate: "tool_call", toolCallId, title, status: "pending", ...running }
+    : { sessionUpdate: "tool_call_update", toolCallId, title, ...running };
+}
