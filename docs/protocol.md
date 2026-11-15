@@ -20,6 +20,8 @@ statement below as an observation about one version, not a contract.
 
 - `claude-science status` prints JSON and always exits 0. Fields used: `running` (boolean),
   `version` (string), `port` (number). **[live]**
+- The `claude-science` executable of a default installation is `~/.claude-science/bin/claude-science`;
+  `~/.claude-science` is the daemon's data folder. **[live]**
 - The daemon listens on loopback. `GET /health` answers 200 without a login; every `/api/*`
   route answers 401 without one. **[live]**
 
@@ -60,7 +62,7 @@ All paths are under `/api`.
 | `POST /projects/<project_id>/request`                  | `{ input_data: { request: <text> }, model?, effort? }` → `{ root_frame_id, frame_id, status: "accepted" }`. Starts a new conversation in the project and its first turn.                                                  | **[live]** |
 | `POST /request`                                        | `{ target_agent, root_frame_id, frame_id, plan_mode: false, intent_id, input_data: { request: <text> } }` → `{ root_frame_id, frame_id, status }`. Sends a further message to an existing conversation and starts a turn. | **[live]** |
 | `POST /frames/<root_id>/cancel`                        | no body → `{ root_frame_id, cancelled_frames: [ids] }`                                                                                                                                                                    | **[live]** |
-| `POST /frames/<id>/resolve-input`                      | `{ responses }`. Answers pending input or approval requests.                                                                                                                                                              | **[web]**  |
+| `POST /frames/<id>/resolve-input`                      | `{ responses: [...] }` → `{ root_frame_id, frame_id, status, race_lost_refusals, remaining_tool_ids }`. Answers input requests. See "Input requests".                                                                     | **[live]** |
 
 Notes on `POST /request`, all **[live]**:
 
@@ -85,8 +87,78 @@ Frame `status` values: `processing`, `completed`, `failed`, `success`, `replaced
 `awaiting_plan_approval`, `awaiting_user_response`. `processing`, `completed` and `cancelled` are
 **[live]**; the rest are **[web]**. The web client treats `completed`, `failed`, `cancelled`,
 `success` and `replaced` as terminal, and the two `awaiting_*` values as settled but waiting for
-the user. A `processing` frame whose `has_pending_input` is true is waiting for an approval; the
-requests are in `pending_input_requests`.
+the user. `awaiting_user_response` is **[live]** for a turn that stopped to ask: see "Input
+requests".
+
+## Input requests
+
+What the daemon asks the user before a turn can go on: an approval, such as access to a folder
+on the user's computer, or a question.
+
+- A turn that stops to ask goes to status `awaiting_user_response`. The `frame_update` event
+  that says so carries the requests in `pending_input_requests`, and `has_pending_input: true`;
+  the daemon sends that event twice. Over HTTP the requests are in the frame's
+  `output_data.pending_input_requests`, where they show up to a quarter of a second after the
+  event. **[live]**
+- A request for folder access, observed: `{ kind: "host", target: <path>, requested_mode: "ro" |
+  "rw", requestId, frameId, rootFrameId, projectId, tool_id, createdAt, mode: "parked" }`. It
+  follows a `request_host_access` tool use by the assistant, whose tool result comes at once.
+  For a request of the conversation's own turn `frameId` is the conversation. **[live]**
+- While a request is pending, `POST /request` answers 400 with `detail: "Please answer the
+  pending question(s) before sending a new message."`. **[live]**
+- `POST /frames/<frameId>/resolve-input` with `{ responses: [...] }` answers requests. A
+  response is `{ requestId, tool_id, approved, action }` plus what its kind takes:
+  - deny: `approved: false, action: "deny"`. **[live]**
+  - allow folder access: `approved: true, action: "allow", mode: "ro" | "rw", scope: "always"`.
+    The daemon then lists the folder under `GET /preferences/host-grants`. **[live]**
+  - allow anything else: `approved: true, action: "allow"`, with `scope: "conversation" |
+    "project" | "always"` to have it remembered and no `scope` for this once. **[web]**
+  - a question (`kind: "ask"`, with `questions: [{ question, header, options: [{ label,
+    description }], multi_select }]`): `approved: true, action: "answer", answers: { <question>:
+    <label> }`, or `approved: false, action: "cancel"` to skip it. The web client shows the
+    first question only, sends several picked labels joined with ", " and sends text the user
+    typed as it is. **[web]**
+- The answer to `resolve-input` is `{ root_frame_id, frame_id, status: "accepted",
+  race_lost_refusals: [], remaining_tool_ids: [] }`. The turn then carries on by itself: the
+  frame is `processing` again at once and ends as any turn does. Answering requests that are
+  no longer pending gives `status: "already_resolved"` with their `tool_id`s in
+  `race_lost_refusals`. **[live]** Answering some of several gives `status: "partial"` with the
+  rest in `remaining_tool_ids`. **[web]**
+- The kinds the web client knows, with the scopes it offers for each and the one it suggests:
+  `network` and `host` (always), `host_delete` and `artifact_delete` (once, conversation),
+  `mcp_tool` and `customize_mutation` (once, conversation, project, always; suggests project),
+  `local_exec`, `remote_read`, `credential_access` and `byoc_kernel` (the same four; suggests
+  conversation), `remote_exec`, `byoc_submit` and `infer_submit` (the same four; suggests
+  once), `skill_license` (project, always), and without scopes `managed_endpoint_register`,
+  `set_goal` and `usage_checkpoint`. The kinds `credential_request`, `ssh_password`,
+  `provider_discovery` and `contact_email` take text the user types. **[web]**
+- The web client sends the answers to the frame that holds the list, which for a sub-agent's
+  request is the sub-agent's frame, and counts a list only on a frame whose status is
+  `awaiting_user_response` or `processing`: a frame's `output_data` can hold what a turn that
+  ended left behind. **[web]**
+- Not observed: a request raised while the frame stays `processing` (`mode` other than
+  `"parked"`), a request of a sub-agent frame, and what a cancel does to a turn that stopped
+  to ask. The fake daemon raises parked requests only and drops them with a cancelled turn.
+  **[open]**
+
+## Conversations and their messages
+
+- `GET /frames?root_only=true&project_id=<id>&limit=<n>` lists a project's conversations, newest
+  first. Each has `id`, `name` (the title), `created_at`, `updated_at`, `status`, `is_hidden` and
+  `conversation_type`. Conversations the user sees have `conversation_type: "agent"`; a project
+  also holds frames of other types (for example `"uploads"`). Whether the list is ever cut short
+  below `limit`, and how to ask for the rest, is unknown. **[live]** for the fields, **[open]** for
+  paging.
+- `GET /frames/<id>/messages?from=<n>&limit=<n>` returns `{ frame_id, from, total, messages }`.
+  A message has `role` (`user` or `assistant`) and `content`. **[live]**
+- `content` is an array of blocks, or for some user messages a plain string. **[live]**
+- Blocks seen: `{ type: "text", text }` **[live]**, and in conversations that used tools
+  `tool_use` (`id`, `name`, `input` with a `human_description`), `tool_result`, `thinking`,
+  `image`. The tool blocks were seen in stored data, not fetched by us over this call. **[web]**
+- The daemon adds messages of its own with `role: "user"` and `_harness_notice: true` (system
+  context such as a compute snapshot or skill hints). They are not something the user typed and
+  must not be shown as such. **[live]**
+- A turn that was cancelled leaves no assistant message in the transcript. **[live]** (seen once)
 
 ## WebSocket
 
@@ -117,6 +189,13 @@ requests are in `pending_input_requests`.
 
 ### Turn lifecycle
 
+Not handled: `text_reset`. ACP cannot take back text already sent to the client, so the adapter
+ignores it; after a reset the client shows the discarded text followed by the restarted reply.
+
+Where a failed turn's reason is reported is unknown. The adapter reads `status_description` from
+the `frame_update` that ends the turn (the field was seen live on `frame_update`, but never on a
+failed turn) and says "no reason given" without it. **[open]**
+
 Observed order for one turn of a conversation whose frame id is `R`, all **[live]**:
 
 1. The client sends the message (`POST /projects/<id>/request` or `POST /request`).
@@ -138,8 +217,102 @@ Rules that follow from what was observed:
 - Events of sub-agent frames are expected to carry the conversation's `root_frame_id` with their
   own `frame_id`. **[web]**
 
+## Recovery
+
+What the adapter does when the login or the connection is lost. Nothing in this section was
+observed on the real daemon: each point names the fact it builds on and the reading chosen where
+there is none. The fake daemon behaves as described here.
+
+- **Expired login.** A request answered 401 gets one new login (steps 1 to 3 of "Login") and is
+  sent once more; a second 401 is an error. This builds on "a 401 means the login is gone".
+  **[open]**
+- **Stale CSRF token.** A write answered 403 with `code: "csrf_stale"` is followed by
+  `GET /api/csrf` and sent once more. **[web]** How that response hands over the new token is not
+  known: the adapter takes it from an `operon_csrf` cookie the response sets, as at login, and
+  ignores the body. The fake sets the cookie and answers `{}`. **[open]**
+- **Keeping the socket alive.** The adapter pings every 25 s and treats the socket as dropped
+  when no `pong` arrives within 10 s, as "WebSocket" above says the web client does.
+- **Reopening the socket.** A dropped socket is reopened, with a growing wait between attempts
+  (1 s, doubling, at most 10 s) for 60 s. Each attempt first runs `claude-science status`, so a
+  daemon that came back on another port is found. A handshake answered 401 gets one new login
+  and one more handshake. The fake keeps the sockets of an expired login open and refuses new
+  handshakes with 401; whether the real daemon closes such sockets, and what it answers to a
+  handshake without a login, is not known. Whether a restarted daemon keeps its port and its
+  logins is not known either: the fake comes back on a new port and without its logins.
+  **[open]**
+- **Catching up after a gap.** Events sent while the socket was down are lost, and nothing says
+  whether text streamed after the gap continues what was received before it. So once the socket
+  was reopened during a turn, the adapter stops using `text_chunk` events for that turn and reads
+  `GET /frames/<id>?shallow=true` and then the last page of `GET /frames/<id>/messages`, right
+  after reopening and again whenever a terminal `frame_update` arrives. From the last message,
+  if its `role` is `assistant`, it takes the text and delivers the part not delivered yet; a
+  terminal status ends the turn. This builds on "reply text can be read from the last assistant
+  message" **[live]** and on these readings, all **[open]**:
+  - A reply's text is the concatenation of the `text` of its content blocks of
+    `type: "text"`, and equals what `text_chunk` events with `block_type: "text"` streamed.
+  - A message appears in the transcript once it is complete, not while it is streamed. The fake
+    commits a reply as one assistant message when the turn ends, so text missed in a gap arrives
+    at the end of the turn.
+  - By the time the daemon has accepted a message (the HTTP response has arrived), the user's
+    message is in the transcript and the frame's status is that of the new turn, so a terminal
+    status read afterwards means this turn has ended.
+  - `from` is a zero-based index into the transcript and `total` its length. The adapter walks
+    the pages (`limit=100`) until `from` plus the number of messages returned reaches `total`.
+    The fake refuses a request without `from` and `limit`.
+  - The frame returned by `GET /frames/<id>` carries the same `status_description` as a
+    `frame_update` does.
+
+  In a turn with several assistant messages (tool use), only the last one is read this way: text
+  of earlier messages that was streamed during or after the gap is not delivered.
+
+### What the adapter does when the daemon is silent
+
+Nothing in this section was observed on the real daemon; the fake daemon invented each behaviour.
+
+- **A daemon that does not answer.** The adapter gives every HTTP request, each login request and
+  the socket handshake 30 s and treats a request that runs out of time as `unreachable`. The fake
+  can stop answering while still accepting connections. Whether `claude-science status` reports a
+  daemon that hangs as running is not known. **[open]**
+- **Cancel without confirmation.** After `POST /frames/<R>/cancel` the adapter waits 10 s for the
+  terminal `frame_update`, counted from the client's cancel, and then ends the turn as cancelled on
+  its own. The fake can answer a cancel as usual and leave the turn running. Whether the real
+  daemon ever does that is not known. **[open]**
+
 ## Open questions
 
 1. Can a conversation be started without a project? **[open]**
-2. Login lifetime, and what an expired login looks like on the WebSocket. **[open]**
-3. Exact shape of `pending_input_requests` and of the `responses` that answer them. **[open]**
+2. Login lifetime, and what an expired login looks like on the WebSocket: whether the daemon
+   closes the socket, and what it answers to a new handshake. See "Recovery" for the reading the
+   adapter and the fake use. **[open]**
+3. Input requests other than folder access, which is the only kind exercised: the fields of
+   each kind, requests raised while the frame stays `processing`, requests of sub-agent frames,
+   and what a cancel does to a turn that stopped to ask. See "Input requests". **[open]**
+4. What `POST /frames/<id>/cancel` answers, and whether it changes the frame's status, for a
+   conversation with no running turn or for an unknown id. The adapter only cancels a turn it is
+   following; the fake answers an empty `cancelled_frames` and 404 respectively and changes
+   nothing. **[open]**
+5. The type of a project's `archived_at`, and whether `GET /projects` returns every project in one
+   response (`total` hints at paging). Until this is observed, the code treats a project as
+   archived when `archived_at` is anything but null or absent, and reads only the one response;
+   the fake daemon sends null for a project in use and a timestamp string for an archived one.
+   **[open]**
+6. What `GET /api/csrf` answers, and whether a token issued earlier stays valid. **[open]**
+7. What a restarted daemon makes of a turn it was running: whether the frame stays `processing`,
+   and whether the conversation then takes a further message. The adapter keeps following such a
+   turn until its status changes or the user cancels. **[open]**
+8. The shape of a message's content blocks, when a streamed message enters the transcript, and
+   how the text of a turn with several assistant messages relates to its `text_chunk` events.
+   See "Recovery". **[open]**
+9. What the daemon answers to `POST /request` for a conversation whose turn is still `processing`.
+   This can happen after a cancel that was not confirmed in time or could not be delivered. The
+   fake refuses it with 400. **[open]**
+10. Assumptions the adapter makes about listing and loading that were not all observed: the frame
+    list is a bare JSON array and `limit=1000` is accepted (both seen live for small projects);
+    every listed frame has `id`, `name` and `updated_at` as non-empty strings; `GET
+    /frames/<unknown id>/messages` answers 404; a `tool_use` block carries `id`, `name` and
+    `input.human_description`; `POST /projects` accepts a name that is already taken. **[open]**
+11. `model` and `effort` on messages: a new conversation takes both (`POST
+    /projects/<id>/request`), and the frame then reports them. A further message through `POST
+    /request` changes the model but leaves the effort as it was; `POST /frames/<id>/message`
+    changed neither. **[live]** How the web client changes the effort of a running conversation,
+    if it can, is unknown. **[open]**

@@ -20,7 +20,11 @@ a sub-agent runs in a child frame.
 finishes, fails, is cancelled, or waits for the user.
 
 **Turn event**: one thing that happened during a turn, as reported by the `science-daemon`
-package: reply text, reasoning text, activity, or the end of the turn.
+package: a piece of reply text, input requests, or the end of the turn with its outcome.
+
+**Input request**: something the daemon asks the user before a turn can go on: an approval, for
+example of access to a folder, or a question. It has **choices**; the user's pick is the
+**answer**. _Avoid_: permission (ACP's word for one way of asking), prompt.
 
 **Session**: the ACP client's handle on a conversation. One session maps to at most one
 conversation. _Avoid_: using "session" for the login.
@@ -29,8 +33,11 @@ conversation. _Avoid_: using "session" for the login.
 
 **Login link**: the single-use URL printed by `claude-science url`.
 
-**Project link**: the marker file `.claude-science/project.json` that ties a local folder to a
+**Project link**: the marker file `.csbridge/project.json` that ties a local folder to a
 project. A folder is **linked** when it or one of its ancestors holds one.
+
+**State folder**: where csbridge keeps its own record of which session belongs to which
+conversation (`sessions.jsonl`, identifiers only). Never inside the Claude Science data folder.
 
 **Adapter**: this program in its role as an ACP agent, `csbridge acp`.
 
