@@ -90,6 +90,25 @@ Frame `status` values: `processing`, `completed`, `failed`, `success`, `replaced
 the user. A `processing` frame whose `has_pending_input` is true is waiting for an approval; the
 requests are in `pending_input_requests`.
 
+## Conversations and their messages
+
+- `GET /frames?root_only=true&project_id=<id>&limit=<n>` lists a project's conversations, newest
+  first. Each has `id`, `name` (the title), `created_at`, `updated_at`, `status`, `is_hidden` and
+  `conversation_type`. Conversations the user sees have `conversation_type: "agent"`; a project
+  also holds frames of other types (for example `"uploads"`). Whether the list is ever cut short
+  below `limit`, and how to ask for the rest, is unknown. **[live]** for the fields, **[open]** for
+  paging.
+- `GET /frames/<id>/messages?from=<n>&limit=<n>` returns `{ frame_id, from, total, messages }`.
+  A message has `role` (`user` or `assistant`) and `content`. **[live]**
+- `content` is an array of blocks, or for some user messages a plain string. **[live]**
+- Blocks seen: `{ type: "text", text }` **[live]**, and in conversations that used tools
+  `tool_use` (`id`, `name`, `input` with a `human_description`), `tool_result`, `thinking`,
+  `image`. The tool blocks were seen in stored data, not fetched by us over this call. **[web]**
+- The daemon adds messages of its own with `role: "user"` and `_harness_notice: true` (system
+  context such as a compute snapshot or skill hints). They are not something the user typed and
+  must not be shown as such. **[live]**
+- A turn that was cancelled leaves no assistant message in the transcript. **[live]** (seen once)
+
 ## WebSocket
 
 - URL: `ws://<host>:<port>/api/ws?user_id=<user_id from /me>`. **[live]**
