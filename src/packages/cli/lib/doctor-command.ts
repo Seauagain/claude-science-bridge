@@ -1,7 +1,7 @@
 import { findProjectLink, ProjectLinkError } from "../../project-link/index.ts";
-import { checkDaemonSetup, type ScienceCli, type SetupCheck } from "../../science-daemon/index.ts";
+import { checkDaemonSetup, type SetupCheck } from "../../science-daemon/index.ts";
 import { daemonSetup } from "./daemon-setup.ts";
-import type { CliIo } from "./run-cli.ts";
+import type { CommandIo } from "./run-cli.ts";
 
 const LABELS: Readonly<Record<SetupCheck["status"], string>> = {
   pass: "ok",
@@ -13,7 +13,7 @@ const LABELS: Readonly<Record<SetupCheck["status"], string>> = {
  * `csbridge doctor`: checks the whole setup and prints one line per check on standard output.
  * Returns 1 when a check failed and 0 otherwise; a warning does not fail it.
  */
-export async function runDoctorCommand(io: CliIo & { scienceCli: ScienceCli }): Promise<number> {
+export async function runDoctorCommand(io: CommandIo): Promise<number> {
   const checks = [
     ...(await checkDaemonSetup(io.scienceCli, daemonSetup(io))),
     await checkProjectLink(io.cwd),

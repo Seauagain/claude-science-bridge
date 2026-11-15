@@ -32,35 +32,38 @@ export async function checkDaemonSetup(
   options: Pick<ConnectOptions, "startCommand"> = {},
 ): Promise<SetupCheck[]> {
   const checks: SetupCheck[] = [];
+  /** The check being made: the one that failed, if anything below throws. */
+  let checking: (typeof CHECK_NAMES)[number] = "Science CLI";
   try {
     const status = await runScienceCli(scienceCli, ["status"]);
-    checks.push({ name: "Science CLI", status: "pass", message: "found" });
+    checks.push({ name: checking, status: "pass", message: "found" });
 
+    checking = "Daemon";
     const endpoint = parseDaemonStatus(status, options.startCommand);
-    checks.push({ name: "Daemon", status: "pass", message: `running at ${endpoint.baseUrl}` });
+    checks.push({ name: checking, status: "pass", message: `running at ${endpoint.baseUrl}` });
 
+    checking = "Daemon version";
     const warning = untestedVersionWarning(endpoint.version);
     checks.push(
       warning === undefined
-        ? { name: "Daemon version", status: "pass", message: `${endpoint.version}, tested` }
-        : { name: "Daemon version", status: "warning", message: warning },
+        ? { name: checking, status: "pass", message: `${endpoint.version}, tested` }
+        : { name: checking, status: "warning", message: warning },
     );
 
+    checking = "Login";
     const { requestTimeoutMs } = DEFAULT_TIMING;
     const login = await logIn(endpoint, scienceCli, requestTimeoutMs);
     const access = new DaemonAccess(scienceCli, endpoint, login, requestTimeoutMs);
     await createDaemonHttp(access).get("/me");
-    checks.push({ name: "Login", status: "pass", message: "the daemon accepted a login link" });
+    checks.push({ name: checking, status: "pass", message: "the daemon accepted a login link" });
   } catch (error) {
     if (!(error instanceof ScienceDaemonError)) throw error;
-    // Every check before the one that threw has been recorded, so the count names the culprit.
-    const [failed = "Login", ...notChecked] = CHECK_NAMES.slice(checks.length);
-    checks.push({ name: failed, status: "failure", message: error.message });
-    for (const name of notChecked) {
+    checks.push({ name: checking, status: "failure", message: error.message });
+    for (const name of CHECK_NAMES.slice(CHECK_NAMES.indexOf(checking) + 1)) {
       checks.push({
         name,
         status: "failure",
-        message: `not checked, because the "${failed}" check failed. Fix that first.`,
+        message: `not checked, because the "${checking}" check failed. Fix that first.`,
       });
     }
   }

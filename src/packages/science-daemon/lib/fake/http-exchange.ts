@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { text } from "node:stream/consumers";
 
 /** What the fake daemon answers to one request: an HTTP status and a JSON body. */
 export interface Answer {
@@ -16,10 +17,8 @@ export function parseCookies(request: IncomingMessage): Map<string, string> {
   return cookies;
 }
 
-export async function readBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString("utf8");
+export function readBody(request: IncomingMessage): Promise<string> {
+  return text(request);
 }
 
 export function sendJson(response: ServerResponse, status: number, body: unknown): void {

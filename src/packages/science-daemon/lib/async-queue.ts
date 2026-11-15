@@ -11,7 +11,6 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     | undefined;
   #state: "open" | "ended" | "failed" = "open";
   #failure: unknown;
-  #closed = false;
 
   constructor(onClose: () => void = () => {}) {
     this.#onClose = onClose;
@@ -28,7 +27,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
   end(): void {
     if (this.#state !== "open") return;
     this.#state = "ended";
-    this.#close();
+    this.#onClose();
     this.#takeWaiter()?.resolve({ done: true, value: undefined });
   }
 
@@ -37,7 +36,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     if (this.#state !== "open") return;
     this.#state = "failed";
     this.#failure = error;
-    this.#close();
+    this.#onClose();
     this.#takeWaiter()?.reject(error);
   }
 
@@ -65,11 +64,5 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     const waiter = this.#waiter;
     this.#waiter = undefined;
     return waiter;
-  }
-
-  #close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    this.#onClose();
   }
 }

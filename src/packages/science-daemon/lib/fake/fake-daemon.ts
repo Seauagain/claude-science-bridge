@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
@@ -24,6 +23,12 @@ interface Project {
 const OBSERVED_VERSION = "0.1.53";
 const TIMESTAMP = "2026-11-15T08:00:00Z";
 
+/**
+ * Starts a fake daemon on a free loopback port and resolves once it listens. It starts out with
+ * no projects and no conversations, accepts login links from its own Science CLI stand-in, and
+ * answers as docs/protocol.md says until a test tells it otherwise. It holds a port and open
+ * sockets: close it when the test is done.
+ */
 export async function startFakeScienceDaemon(): Promise<FakeScienceDaemon> {
   const daemon = new FakeDaemon();
   await daemon.start();
@@ -58,7 +63,11 @@ class FakeDaemon implements FakeScienceDaemon {
 
   async start(): Promise<void> {
     await new Promise<void>((resolve) => this.#server.listen(0, "127.0.0.1", resolve));
-    this.#port = (this.#server.address() as AddressInfo).port;
+    const address = this.#server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("fake daemon: the server is not listening on a TCP port");
+    }
+    this.#port = address.port;
   }
 
   readonly scienceCli: ScienceCli = async (args) => {

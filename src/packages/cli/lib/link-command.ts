@@ -6,18 +6,15 @@ import {
   ProjectLinkError,
   writeProjectLink,
 } from "../../project-link/index.ts";
-import type { Project, ScienceCli } from "../../science-daemon/index.ts";
+import type { Project } from "../../science-daemon/index.ts";
 import { daemonSetup } from "./daemon-setup.ts";
 import { CommandError, reportFailure } from "./failure.ts";
 import { parseLinkArguments } from "./link-arguments.ts";
 import { fetchProjects, NO_PROJECTS, projectLine } from "./project-listing.ts";
-import type { CliIo } from "./run-cli.ts";
+import type { CommandIo } from "./run-cli.ts";
 
 /** `csbridge link --project <id or name> [folder]`: links a folder to a project. */
-export async function runLinkCommand(
-  args: readonly string[],
-  io: CliIo & { scienceCli: ScienceCli },
-): Promise<number> {
+export async function runLinkCommand(args: readonly string[], io: CommandIo): Promise<number> {
   try {
     const wanted = parseLinkArguments(args);
     const folder = resolve(io.cwd, wanted.folder ?? ".");
