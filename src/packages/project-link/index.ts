@@ -5,3 +5,4 @@
  */
 export { findProjectLink } from "./lib/find-project-link.ts";
 export { type ProjectLink, ProjectLinkError } from "./lib/project-link.ts";
+export { type WriteProjectLinkOptions, writeProjectLink } from "./lib/write-project-link.ts";

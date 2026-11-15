@@ -1,0 +1,10 @@
+/**
+ * The local Claude Science daemon: finding it, logging in, starting conversations and following
+ * their turns. Everything this project knows about the daemon's interface is behind this file;
+ * docs/protocol.md is the written counterpart.
+ */
+export { type ConnectOptions, connectScienceDaemon, type ScienceDaemon } from "./lib/connect.ts";
+export { ScienceDaemonError, type ScienceDaemonErrorKind } from "./lib/errors.ts";
+export { createScienceCli, type ScienceCliOptions } from "./lib/real-science-cli.ts";
+export type { ScienceCli } from "./lib/science-cli.ts";
+export type { Turn, TurnEvent, TurnOutcome } from "./lib/turn.ts";
