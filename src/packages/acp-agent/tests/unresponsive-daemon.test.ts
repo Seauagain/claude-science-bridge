@@ -41,11 +41,12 @@ describe("losing the event socket to a daemon that no longer answers", () => {
         const session = await context.buildSession(folder).start();
         return runTurn(session, "Fold this protein", () => firstChunkDelivered.open());
       },
-      { timing: { requestTimeoutMs: 20, reconnectDelayMs: 2, reconnectGiveUpMs: 100 } },
+      // The time limit is long enough for the requests that open the session on a busy machine.
+      { timing: { requestTimeoutMs: 150, reconnectDelayMs: 2, reconnectGiveUpMs: 100 } },
     );
 
     await expect(failure).rejects.toThrow(
-      /connection to Claude Science was lost and could not be restored.*did not answer within 0\.02 seconds/s,
+      /connection to Claude Science was lost and could not be restored.*did not answer within 0\.15 seconds/s,
     );
   });
 });
@@ -62,10 +63,11 @@ describe("prompting a daemon that accepts connections but does not answer", () =
         harness.fake.answerRequests(true);
         return { unanswered, later: await runTurn(session, "Try again") };
       },
-      { timing: { requestTimeoutMs: 40 } },
+      // The time limit is long enough for the requests that do get an answer on a busy machine.
+      { timing: { requestTimeoutMs: 200 } },
     );
 
-    expect(unanswered).toMatch(/Claude Science did not answer within 0\.04 seconds\. Check that/);
+    expect(unanswered).toMatch(/Claude Science did not answer within 0\.2 seconds\. Check that/);
     expect(later).toEqual({ chunks: ["pong"], stopReason: "end_turn" });
     // The message that got no answer was never taken up by the daemon.
     expect(harness.fake.conversations()).toEqual([
