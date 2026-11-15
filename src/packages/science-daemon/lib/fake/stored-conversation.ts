@@ -27,6 +27,10 @@ export interface StoredConversation {
    * message; while it is being streamed it is not part of the transcript.
    */
   readonly transcript: StoredMessage[];
+  /** The model the conversation runs on, or null when it was started without naming one. */
+  model: string | null;
+  /** The effort the conversation was started with. The daemon does not change it afterwards. */
+  readonly effort: string | null;
   status: string;
   /** Sent along with `status`; the reason when a turn failed. */
   statusDescription: string | undefined;
@@ -48,6 +52,8 @@ export function frameOf(conversation: StoredConversation): JsonRecord {
     status: conversation.status,
     conversation_type: conversation.conversationType,
     is_hidden: conversation.hidden,
+    model: conversation.model,
+    effort: conversation.effort,
     created_at: TIMESTAMP,
     updated_at: conversation.updatedAt,
     ...(description === undefined ? {} : { status_description: description }),

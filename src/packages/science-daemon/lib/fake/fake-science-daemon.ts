@@ -55,6 +55,8 @@ export interface FakeScienceDaemon {
   endTurnsOnCancel(end: boolean): void;
   /** Every conversation the daemon holds, added or started by a message, oldest first. */
   conversations(): FakeConversation[];
+  /** The model and effort each conversation has, in the order of {@link conversations}. */
+  conversationSettings(): { model: string | null; effort: string | null }[];
   /**
    * Identifiers of the conversations a cancel was requested for, oldest request first. Includes
    * requests that found no running turn.

@@ -52,6 +52,10 @@ export interface ExistingConversation {
    * also holds frames of other types, for example `"uploads"`.
    */
   readonly conversationType?: string;
+  /** The frame's `model`. Default: none, as for a conversation started without naming one. */
+  readonly model?: string;
+  /** The frame's `effort`. Default: none. */
+  readonly effort?: string;
   /** The transcript, oldest message first. Default: no messages. */
   readonly transcript?: readonly ExistingMessage[];
 }

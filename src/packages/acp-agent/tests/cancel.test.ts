@@ -1,3 +1,4 @@
+import { methods } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gate, gate } from "./support/gate.ts";
 import { cancelTurn, type Harness, runTurn, startHarness } from "./support/harness.ts";
@@ -91,7 +92,9 @@ describe("cancelling a running reply", () => {
         await message.onItsWay;
         await cancelTurn(context, session);
         // A request answered after the cancel gives the adapter time to have seen the cancel.
-        await context.buildSession(folder).start();
+        // Listing sessions without naming a folder is answered without asking the daemon, whose
+        // login is held back here.
+        await context.request(methods.agent.session.list, {});
         message.release();
         return turn;
       },

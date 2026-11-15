@@ -6,6 +6,7 @@ import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake
 import { FakeConversations } from "./fake-conversations.ts";
 import { FakeEventSockets } from "./fake-event-sockets.ts";
 import { FakeLogins } from "./fake-logins.ts";
+import { FAKE_MODELS } from "./fake-models.ts";
 import { type FakeProject, FakeProjects } from "./fake-projects.ts";
 import type { FakeScienceDaemon } from "./fake-science-daemon.ts";
 import { type Answer, readBody, sendJson, undocumented } from "./http-exchange.ts";
@@ -127,6 +128,10 @@ class FakeDaemon implements FakeScienceDaemon {
     return this.#conversations.list();
   }
 
+  conversationSettings(): { model: string | null; effort: string | null }[] {
+    return this.#conversations.settings();
+  }
+
   cancelRequests(): string[] {
     return this.#conversations.cancelRequests();
   }
@@ -207,6 +212,7 @@ class FakeDaemon implements FakeScienceDaemon {
   /** The routes of "REST endpoints used" in docs/protocol.md, for a logged-in request. */
   async #answer(route: string, url: URL, request: IncomingMessage): Promise<Answer> {
     if (route === "GET /api/me") return { status: 200, body: { user_id: "fake-user" } };
+    if (route === "GET /api/models") return { status: 200, body: FAKE_MODELS };
     if (route === "GET /api/projects") {
       return this.#projects.list((projectId) => this.#conversations.countIn(projectId));
     }

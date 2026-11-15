@@ -8,12 +8,17 @@ import {
   RequestError,
 } from "@agentclientprotocol/sdk";
 import { findProjectLink } from "../../project-link/index.ts";
-import { type ScienceDaemon, ScienceDaemonError } from "../../science-daemon/index.ts";
-import { rethrowAsRequestError } from "./errors.ts";
+import {
+  type ModelCatalog,
+  type ScienceDaemon,
+  ScienceDaemonError,
+} from "../../science-daemon/index.ts";
+import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
 import { createFolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
 import { openSessionRecord } from "./session-record.ts";
+import { chooseSetting, settingsOptions } from "./settings.ts";
 
 /** What {@link createScienceAgent} needs. */
 export interface ScienceAgentOptions {
@@ -56,6 +61,28 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     return connection;
   };
   const projectOf = createFolderProjects(daemon);
+  // The models are asked for anew for each session: the daemon's list can change while this
+  // process runs. A list csbridge cannot read costs the model and effort options, not the
+  // session.
+  let knownModels: ModelCatalog | undefined;
+  const models = (): Promise<ModelCatalog | undefined> =>
+    daemon()
+      .then((science) => science.listModels())
+      .then((catalog) => {
+        knownModels = catalog;
+        return catalog;
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ScienceDaemonError && error.kind === "unexpected-response") {
+          return undefined;
+        }
+        throw error;
+      });
+  /** The part of a session's answer that tells the client its model and effort options. */
+  const optionsOf = async (session: Session) => {
+    const catalog = await models();
+    return catalog === undefined ? {} : { configOptions: settingsOptions(catalog, session) };
+  };
 
   return agent({ name: "claude-science-bridge" })
     .onRequest(methods.agent.initialize, () => ({
@@ -77,9 +104,10 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
       // after the user has typed a prompt.
       await daemon().catch(rethrowAsRequestError);
       const sessionId = randomUUID();
-      sessions.set(sessionId, { cwd: params.cwd });
+      const session: Session = { cwd: params.cwd };
+      sessions.set(sessionId, session);
       await offerCommands(client, sessionId);
-      return { sessionId };
+      return { sessionId, ...(await optionsOf(session).catch(rethrowAsRequestError)) };
     })
     .onRequest(methods.agent.session.list, async ({ params }) => {
       const folder = params.cwd;
@@ -112,15 +140,21 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         // A session the client opened has an identifier of its own, and its conversation is on
         // record. Any other identifier is that of a conversation the client found in the list.
         const conversationId = (await record.conversationOf(sessionId)) ?? sessionId;
-        const transcript = await (await daemon()).readTranscript(conversationId);
+        const science = await daemon();
+        const transcript = await science.readTranscript(conversationId);
         // The client fills the thread from these, so they all go out before the answer.
         for (const update of historyUpdates(transcript)) {
           await client.notify(methods.client.session.update, { sessionId, update });
         }
         // A session this process is serving already keeps its state, such as a running prompt.
-        if (!sessions.has(sessionId)) sessions.set(sessionId, { cwd: params.cwd, conversationId });
+        const session = sessions.get(sessionId) ?? {
+          cwd: params.cwd,
+          conversationId,
+          ...(await science.conversationSettings(conversationId)),
+        };
+        sessions.set(sessionId, session);
         await offerCommands(client, sessionId);
-        return {};
+        return await optionsOf(session);
       } catch (error) {
         if (error instanceof ScienceDaemonError && error.kind === "not-found") {
           throw RequestError.sessionNotFound(sessionId);
@@ -128,10 +162,27 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         return rethrowAsRequestError(error);
       }
     })
+    .onRequest(methods.agent.session.setConfigOption, async ({ params }) => {
+      const session = sessions.get(params.sessionId);
+      if (session === undefined) throw RequestError.sessionNotFound(params.sessionId);
+      const catalog = await models().catch(rethrowAsRequestError);
+      if (catalog === undefined) {
+        throw new RequestError(INVALID_PARAMS, `This session has no option "${params.configId}".`);
+      }
+      chooseSetting(catalog, session, params.configId, params.value);
+      return { configOptions: settingsOptions(catalog, session) };
+    })
     .onRequest(methods.agent.session.prompt, ({ params, client }) => {
       const session = sessions.get(params.sessionId);
       if (session === undefined) throw RequestError.sessionNotFound(params.sessionId);
-      return answerPrompt(session, params, { client, daemon, projectOf, record });
+      return answerPrompt(session, params, {
+        client,
+        daemon,
+        projectOf,
+        record,
+        // Every session asked for the models when it was set up; a prompt does not ask again.
+        models: () => knownModels,
+      });
     })
     .onNotification(methods.agent.session.cancel, ({ params }) => {
       // Nothing happens when no prompt is being answered or this one is cancelled already.

@@ -66,6 +66,11 @@ export class FakeConversations {
     }));
   }
 
+  /** The model and effort of every conversation, in the order of {@link list}. */
+  settings(): { model: string | null; effort: string | null }[] {
+    return this.#conversations.map(({ model, effort }) => ({ model, effort }));
+  }
+
   countIn(projectId: string): number {
     return this.#conversations.filter((each) => each.projectId === projectId).length;
   }
@@ -86,6 +91,8 @@ export class FakeConversations {
       hidden: existing.hidden ?? false,
       updatedAt: existing.updatedAt,
       transcript: [...(existing.transcript ?? [])],
+      model: existing.model ?? null,
+      effort: existing.effort ?? null,
     });
     return conversation.id;
   }
@@ -102,7 +109,10 @@ export class FakeConversations {
 
     // docs/protocol.md does not say what the daemon calls a conversation it has just been sent.
     // The fake uses the first message.
-    const conversation = this.#store(projectId, input, "processing");
+    const conversation = this.#store(projectId, input, "processing", {
+      model: namedIn(body, "model"),
+      effort: namedIn(body, "effort"),
+    });
     this.#beginTurn(conversation, input);
     return {
       status: 200,
@@ -129,6 +139,9 @@ export class FakeConversations {
       return { status: message.refusal.httpStatus, body: { detail: message.refusal.detail } };
     }
     this.#intentIds.add(message.intentId);
+    // A further message can name another model. An effort it names changes nothing: the
+    // conversation keeps the one it started with. See docs/protocol.md.
+    message.conversation.model = namedIn(body, "model") ?? message.conversation.model;
     this.#beginTurn(message.conversation, message.text);
     return {
       status: 200,
@@ -187,6 +200,8 @@ export class FakeConversations {
       transcript: [],
       status,
       statusDescription: undefined,
+      model: null,
+      effort: null,
       ...frame,
       received: [],
       cancelTurn: undefined,
@@ -279,4 +294,10 @@ function textMessage(role: "user" | "assistant", text: string): StoredMessage {
 
 function notFound(frameId: string): Answer {
   return { status: 404, body: { detail: `Frame ${frameId} not found` } };
+}
+
+/** The string a request body holds under `field`, or null when it holds none. */
+function namedIn(body: unknown, field: string): string | null {
+  const value = isRecord(body) ? body[field] : undefined;
+  return typeof value === "string" ? value : null;
 }

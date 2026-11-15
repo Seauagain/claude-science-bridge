@@ -6,6 +6,7 @@ import {
   RequestError,
 } from "@agentclientprotocol/sdk";
 import {
+  type ModelCatalog,
   type ScienceDaemon,
   ScienceDaemonError,
   type TranscriptEntry,
@@ -16,11 +17,16 @@ import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
 import { promptText } from "./prompt-text.ts";
 import type { SessionRecord } from "./session-record.ts";
+import { settingsInForce } from "./settings.ts";
 
 /** An ACP session: the client's handle on at most one conversation. */
 export interface Session {
   /** The session's working folder. Its project gets the conversation. */
   readonly cwd: string;
+  /** The model the user chose or the conversation has. Absent: the daemon's default. */
+  model?: string;
+  /** The effort the user chose or the conversation started with. Absent: the default. */
+  effort?: string;
   /**
    * Set by the first prompt, which creates the conversation, or from the start for a session
    * that was loaded.
@@ -43,6 +49,11 @@ export interface PromptSurroundings {
   readonly projectOf: FolderProjects;
   /** Where a session's conversation is recorded once the first prompt has started it. */
   readonly record: SessionRecord;
+  /**
+   * The daemon's models as last fetched, or nothing when it describes them in a way csbridge
+   * cannot read. Read without a request, so that sending a prompt is not held up by it.
+   */
+  readonly models: () => ModelCatalog | undefined;
 }
 
 /**
@@ -135,6 +146,7 @@ async function openConversation(
       throw error;
     });
   session.conversationId = conversationId;
+  Object.assign(session, await (await surroundings.daemon()).conversationSettings(conversationId));
   // On record, the conversation is this thread's: it is no longer offered for import, and
   // another adapter process can load the session.
   await surroundings.record.remember(request.sessionId, conversationId);
@@ -178,11 +190,13 @@ async function sendPrompt(
   session: Session,
   request: PromptRequest,
   cancel: AbortSignal,
-  { client, daemon, projectOf, record }: PromptSurroundings,
+  { client, daemon, projectOf, record, models }: PromptSurroundings,
 ): Promise<Turn> {
   const message = promptText(request.prompt);
   if (session.conversationId !== undefined) {
-    return (await daemon()).sendMessage(session.conversationId, message, cancel);
+    // A model the user picked since the last message is used from this one on.
+    const settings = session.model === undefined ? {} : { model: session.model };
+    return (await daemon()).sendMessage(session.conversationId, message, cancel, settings);
   }
   // The folder's project is settled now and not when the session is opened: a client opens
   // sessions in folders of its own choosing just to find out what the agent can do, and those
@@ -194,8 +208,12 @@ async function sendPrompt(
       update: { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: note } },
     });
   }
-  const turn = await (await daemon()).startConversation(projectId, message, cancel);
+  const catalog = models();
+  const settings = catalog === undefined ? {} : settingsInForce(catalog, session);
+  const turn = await (await daemon()).startConversation(projectId, message, cancel, settings);
   session.conversationId = turn.conversationId;
+  // What the conversation started with is what the session shows from now on.
+  Object.assign(session, settings);
   // From here on the session can be loaded by another adapter process. If this fails, so does
   // the prompt, although its turn runs on: the user has to learn that the thread will be lost.
   await record.remember(request.sessionId, turn.conversationId);

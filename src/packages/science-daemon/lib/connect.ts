@@ -6,6 +6,12 @@ import { type Conversation, listConversations } from "./conversations.ts";
 import { locateDaemon } from "./endpoint.ts";
 import { createDaemonHttp, type DaemonHttp } from "./http.ts";
 import { logIn } from "./login.ts";
+import {
+  type ConversationSettings,
+  listModels,
+  type ModelCatalog,
+  readConversationSettings,
+} from "./models.ts";
 import { createProject, listProjects, type Project } from "./projects.ts";
 import type { ScienceCli } from "./science-cli.ts";
 import { type DaemonSocket, openDaemonSocket, type SocketSignal } from "./socket.ts";
@@ -56,22 +62,47 @@ export interface ScienceDaemon {
    */
   readTranscript(conversationId: string): Promise<TranscriptEntry[]>;
   /**
+   * Lists the models the daemon offers, with the effort levels each takes and the defaults.
+   *
+   * @throws ScienceDaemonError when the daemon cannot be reached or answers unexpectedly.
+   */
+  listModels(): Promise<ModelCatalog>;
+  /**
+   * Reads the model and effort a conversation has.
+   *
+   * @throws ScienceDaemonError with kind `not-found` when the daemon has no such conversation.
+   */
+  conversationSettings(conversationId: string): Promise<ConversationSettings>;
+  /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
+   * `settings` names the model and effort the conversation gets; what is left out is the
+   * daemon's default.
    * Aborting `cancel` stops the reply: see {@link Turn.events}.
    *
    * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached, and
    *   with kind `cancelled` when `cancel` was aborted before the message was sent. The message
    *   is then not sent at all, and the rejection does not wait for the connection.
    */
-  startConversation(projectId: string, message: string, cancel: AbortSignal): Promise<Turn>;
+  startConversation(
+    projectId: string,
+    message: string,
+    cancel: AbortSignal,
+    settings?: ConversationSettings,
+  ): Promise<Turn>;
   /**
    * Sends a further message to an existing conversation, and with it starts the next turn.
    * The conversation's previous turn must have ended. Aborting `cancel` stops the reply: see
-   * {@link Turn.events}.
+   * {@link Turn.events}. A model named in `settings` is used from this message on; an effort is
+   * not, because the daemon keeps the effort a conversation started with.
    *
    * @throws ScienceDaemonError as {@link ScienceDaemon.startConversation} does.
    */
-  sendMessage(conversationId: string, message: string, cancel: AbortSignal): Promise<Turn>;
+  sendMessage(
+    conversationId: string,
+    message: string,
+    cancel: AbortSignal,
+    settings?: ConversationSettings,
+  ): Promise<Turn>;
   /**
    * Closes the connection for good and stops every attempt to restore it. Turns still running
    * stop producing events.
@@ -139,18 +170,27 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
       await socket.ready();
       return readTranscript(http, conversationId);
     },
-    startConversation: (projectId, message, cancel) =>
+    async listModels() {
+      await socket.ready();
+      return listModels(http);
+    },
+    async conversationSettings(conversationId) {
+      await socket.ready();
+      return readConversationSettings(http, conversationId);
+    },
+    startConversation: (projectId, message, cancel, settings = {}) =>
       startTurn(channel, cancel, async () => {
         const call = "POST /projects/<id>/request";
         const response = expectRecord(
           await http.post(`/projects/${encodeURIComponent(projectId)}/request`, {
             input_data: { request: message },
+            ...settings,
           }),
           call,
         );
         return expectString(response, "root_frame_id", call);
       }),
-    sendMessage: (conversationId, message, cancel) =>
+    sendMessage: (conversationId, message, cancel, settings = {}) =>
       startTurn(channel, cancel, async () => {
         const frameCall = "GET /frames/<id>";
         const frame = expectRecord(
@@ -164,6 +204,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
           plan_mode: false,
           intent_id: randomUUID(),
           input_data: { request: message },
+          ...(settings.model === undefined ? {} : { model: settings.model }),
         });
         return conversationId;
       }),

@@ -4,6 +4,8 @@ import { ScienceDaemonError } from "../../science-daemon/index.ts";
 
 /** JSON-RPC: the request cannot be served as things stand. */
 export const INVALID_REQUEST = -32600;
+/** JSON-RPC: the request names something the agent does not have, or a value it cannot take. */
+export const INVALID_PARAMS = -32602;
 /** JSON-RPC: the agent failed to serve a request that was in order. */
 export const INTERNAL_ERROR = -32603;
 
