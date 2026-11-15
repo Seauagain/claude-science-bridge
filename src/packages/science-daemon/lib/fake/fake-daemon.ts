@@ -38,6 +38,8 @@ export interface FakeScienceDaemon {
   readonly scienceCli: ScienceCli;
   /** Makes the Science CLI stand-in report the daemon as running (the default) or not running. */
   reportRunning(running: boolean): void;
+  /** Makes the Science CLI stand-in report `version` instead of the version protocol.md covers. */
+  reportVersion(version: string): void;
   /**
    * Answers the next logged-in request to `route` (for example `"GET /api/me"`) with `body`
    * instead of the usual response, as a daemon version with a different interface would.
@@ -61,7 +63,8 @@ interface Conversation {
   status: string;
 }
 
-const VERSION = "0.1.53";
+/** The daemon version docs/protocol.md was observed on. */
+const OBSERVED_VERSION = "0.1.53";
 const AGENT_NAME = "OPERON";
 const defaultReply: ReplyScript = (turn) => {
   turn.replyText("pong");
@@ -88,6 +91,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #responseOverrides = new Map<string, unknown>();
   #port = 0;
   #running = true;
+  #version = OBSERVED_VERSION;
 
   constructor() {
     this.#server = createServer((request, response) => {
@@ -107,7 +111,7 @@ class FakeDaemon implements FakeScienceDaemon {
     if (args[0] === "status") {
       // What the real program prints besides `running` when no daemon is up is not known.
       if (!this.#running) return JSON.stringify({ running: false });
-      return JSON.stringify({ running: true, version: VERSION, port: this.#port });
+      return JSON.stringify({ running: true, version: this.#version, port: this.#port });
     }
     if (args[0] === "url") {
       const nonce = randomBytes(16).toString("hex");
@@ -119,6 +123,10 @@ class FakeDaemon implements FakeScienceDaemon {
 
   reportRunning(running: boolean): void {
     this.#running = running;
+  }
+
+  reportVersion(version: string): void {
+    this.#version = version;
   }
 
   respondOnce(route: string, body: unknown): void {

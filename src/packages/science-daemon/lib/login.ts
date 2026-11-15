@@ -66,9 +66,12 @@ async function request(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, { ...init, redirect: "manual" });
   } catch (cause) {
-    throw new ScienceDaemonError("unreachable", "Could not reach Claude Science to log in.", {
-      cause,
-    });
+    throw new ScienceDaemonError(
+      "unreachable",
+      "Could not reach Claude Science to log in. " +
+        "Check that it is still running (`claude-science status`).",
+      { cause },
+    );
   }
 }
 

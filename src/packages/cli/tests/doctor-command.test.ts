@@ -1,0 +1,160 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeProjectLink } from "../../project-link/index.ts";
+import type { ScienceCli } from "../../science-daemon/index.ts";
+import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../science-daemon/testing.ts";
+import { runCli } from "../index.ts";
+
+let fake: FakeScienceDaemon;
+/** A temporary folder linked to the project "Protein folding" on the fake daemon. */
+let linkedFolder: string;
+let unlinkedFolder: string;
+
+beforeEach(async () => {
+  fake = await startFakeScienceDaemon();
+  linkedFolder = await mkdtemp(join(tmpdir(), "csbridge-doctor-"));
+  unlinkedFolder = await mkdtemp(join(tmpdir(), "csbridge-doctor-"));
+  await writeProjectLink(linkedFolder, {
+    projectId: fake.addProject("Protein folding"),
+    name: "Protein folding",
+  });
+});
+
+afterEach(async () => {
+  await fake.close();
+  await rm(linkedFolder, { recursive: true, force: true });
+  await rm(unlinkedFolder, { recursive: true, force: true });
+});
+
+/** Runs `csbridge doctor` in `cwd` and returns its exit code and the lines it printed. */
+async function runDoctor(setup: { cwd?: string; scienceCli?: ScienceCli } = {}) {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const printed = { stdout: "", stderr: "" };
+  stdout.on("data", (chunk) => {
+    printed.stdout += String(chunk);
+  });
+  stderr.on("data", (chunk) => {
+    printed.stderr += String(chunk);
+  });
+  const exitCode = await runCli(["doctor"], {
+    stdin: new PassThrough(),
+    stdout,
+    stderr,
+    env: {},
+    cwd: setup.cwd ?? linkedFolder,
+    scienceCli: setup.scienceCli ?? fake.scienceCli,
+  });
+  return { exitCode, lines: printed.stdout.trimEnd().split("\n"), stderr: printed.stderr };
+}
+
+describe("csbridge doctor", () => {
+  it("passes every check, one line each and in order, when the setup is right", async () => {
+    const { exitCode, lines, stderr } = await runDoctor();
+
+    expect(lines).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^ok +Daemon: /),
+      expect.stringMatching(/^ok +Daemon version: 0\.1\.53/),
+      expect.stringMatching(/^ok +Login: /),
+      expect.stringMatching(/^ok +Project link: .*Protein folding/),
+    ]);
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+  });
+
+  it("fails naming CLAUDE_SCIENCE_BIN when the Science CLI is missing", async () => {
+    const missingScienceCli = () => Promise.reject(new Error("spawn claude-science ENOENT"));
+
+    const { exitCode, lines } = await runDoctor({ scienceCli: missingScienceCli });
+
+    expect(lines).toEqual([
+      expect.stringMatching(/^FAIL +Science CLI: .*CLAUDE_SCIENCE_BIN/),
+      expect.stringMatching(/^FAIL +Daemon: not checked.*"Science CLI"/),
+      expect.stringMatching(/^FAIL +Daemon version: not checked.*"Science CLI"/),
+      expect.stringMatching(/^FAIL +Login: not checked.*"Science CLI"/),
+      expect.stringMatching(/^ok +Project link: /),
+    ]);
+    expect(exitCode).toBe(1);
+  });
+
+  it("fails saying how to start the daemon when it is not running", async () => {
+    fake.reportRunning(false);
+
+    const { exitCode, lines } = await runDoctor();
+
+    expect(lines).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^FAIL +Daemon: .*not running.*claude-science serve/),
+      expect.stringMatching(/^FAIL +Daemon version: not checked.*"Daemon"/),
+      expect.stringMatching(/^FAIL +Login: not checked.*"Daemon"/),
+      expect.stringMatching(/^ok +Project link: /),
+    ]);
+    expect(exitCode).toBe(1);
+  });
+
+  it("warns about a daemon version it was not tested with, without failing", async () => {
+    fake.reportVersion("9.9.9");
+
+    const { exitCode, lines } = await runDoctor();
+
+    expect(lines).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^ok +Daemon: /),
+      expect.stringMatching(/^warn +Daemon version: .*9\.9\.9.*not been tested.*0\.1\.53/),
+      expect.stringMatching(/^ok +Login: /),
+      expect.stringMatching(/^ok +Project link: /),
+    ]);
+    expect(exitCode).toBe(0);
+  });
+
+  it("fails with a next step, and without printing the nonce, when the login is refused", async () => {
+    const nonce = "0123456789abcdef0123456789abcdef";
+    const unknownLoginLink: ScienceCli = async (args) =>
+      args[0] === "url" ? `http://localhost:1/?nonce=${nonce}\n` : fake.scienceCli(args);
+
+    const { exitCode, lines, stderr } = await runDoctor({ scienceCli: unknownLoginLink });
+
+    expect(lines).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^ok +Daemon: /),
+      expect.stringMatching(/^ok +Daemon version: /),
+      expect.stringMatching(/^FAIL +Login: .*did not accept the login link.*claude-science url/),
+      expect.stringMatching(/^ok +Project link: /),
+    ]);
+    expect(exitCode).toBe(1);
+    expect(lines.join("\n") + stderr).not.toContain(nonce);
+  });
+
+  it("warns, without failing, when the current folder is not linked to a project", async () => {
+    const { exitCode, lines } = await runDoctor({ cwd: unlinkedFolder });
+
+    expect(lines.slice(0, 4)).toEqual([
+      expect.stringMatching(/^ok +Science CLI: /),
+      expect.stringMatching(/^ok +Daemon: /),
+      expect.stringMatching(/^ok +Daemon version: /),
+      expect.stringMatching(/^ok +Login: /),
+    ]);
+    expect(lines[4]).toMatch(/^warn +Project link: .*not linked to a project.*csbridge link/);
+    expect(lines[4]).toContain(unlinkedFolder);
+    expect(lines).toHaveLength(5);
+    expect(exitCode).toBe(0);
+  });
+
+  it("fails naming the marker file when the project link cannot be used", async () => {
+    const markerFile = join(unlinkedFolder, ".claude-science", "project.json");
+    await mkdir(dirname(markerFile));
+    await writeFile(markerFile, "{ not json", "utf8");
+
+    const { exitCode, lines } = await runDoctor({ cwd: unlinkedFolder });
+
+    expect(lines[4]).toMatch(
+      /^FAIL +Project link: .*project\.json is not valid JSON.*csbridge link/,
+    );
+    expect(lines).toHaveLength(5);
+    expect(exitCode).toBe(1);
+  });
+});

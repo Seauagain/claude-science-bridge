@@ -31,6 +31,7 @@ function unexpected(call: string, problem: string): ScienceDaemonError {
   return new ScienceDaemonError(
     "unexpected-response",
     `Claude Science answered "${call}" in a way csbridge does not understand (${problem}). ` +
-      "This version of csbridge may not support this version of Claude Science.",
+      "This version of csbridge may not support this version of Claude Science: " +
+      "`csbridge doctor` tells whether it was tested with it.",
   );
 }

@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type FakeScienceDaemon, startFakeScienceDaemon } from "../../science-daemon/testing.ts";
@@ -24,7 +25,14 @@ function startCli(argv: string[]) {
   stderr.on("data", (chunk) => {
     output.stderr += String(chunk);
   });
-  const exitCode = runCli(argv, { stdin, stdout, stderr, env: {}, scienceCli: fake.scienceCli });
+  const exitCode = runCli(argv, {
+    stdin,
+    stdout,
+    stderr,
+    env: {},
+    cwd: tmpdir(),
+    scienceCli: fake.scienceCli,
+  });
   return { stdin, output, exitCode };
 }
 
