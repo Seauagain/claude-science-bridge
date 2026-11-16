@@ -1,3 +1,4 @@
+import { isAttachmentNote, withAttachmentsNamed } from "./attachments.ts";
 import type { DaemonHttp } from "./http.ts";
 import { addedByDaemon } from "./message-origin.ts";
 import { toolUseOf } from "./tool-activity.ts";
@@ -69,14 +70,17 @@ function entriesOf(message: JsonRecord): TranscriptEntry[] {
 
 /**
  * Reasoning, tool results and images are not shown, and neither is a kind of block this version
- * does not know.
+ * does not know. An attachment of the user's shows as its file name: see "Attachments" in
+ * docs/protocol.md.
  */
 function entryOf(role: "user" | "assistant", block: JsonRecord): TranscriptEntry[] {
   if (block.type === "text") {
     // The daemon also puts notices of its own into a message that holds tool results.
     if (typeof block.text !== "string" || block.text === "") return [];
     if (block._harness_notice === true) return [];
-    return [{ type: role === "user" ? "user-text" : "reply-text", text: block.text }];
+    if (role === "assistant") return [{ type: "reply-text", text: block.text }];
+    if (isAttachmentNote(block.text)) return [];
+    return [{ type: "user-text", text: withAttachmentsNamed(block.text) }];
   }
   const toolUse = toolUseOf(block);
   if (toolUse === undefined) return [];

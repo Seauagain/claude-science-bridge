@@ -3,6 +3,7 @@
  * their turns. Everything this project knows about the daemon's interface is behind this file;
  * docs/protocol.md is the written counterpart.
  */
+export type { AttachmentFile } from "./lib/attachments.ts";
 export { type ConnectOptions, connectScienceDaemon, type ScienceDaemon } from "./lib/connect.ts";
 export type { Conversation } from "./lib/conversations.ts";
 export { ScienceDaemonError, type ScienceDaemonErrorKind } from "./lib/errors.ts";

@@ -101,7 +101,8 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         },
         agentCapabilities: {
           loadSession: true,
-          promptCapabilities: { image: false, audio: false, embeddedContext: false },
+          // Images and embedded resources reach Claude Science as attachments of the message.
+          promptCapabilities: { image: true, audio: false, embeddedContext: true },
           sessionCapabilities: { list: {} },
         },
         authMethods: [],

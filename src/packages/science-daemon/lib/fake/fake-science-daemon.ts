@@ -1,5 +1,6 @@
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
+import type { FakeAttachment } from "./fake-attachments.ts";
 import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversation.ts";
 import type { FakeProject } from "./fake-projects.ts";
 
@@ -44,6 +45,8 @@ export interface FakeScienceDaemon {
    * transcript and its last turn ended, and returns its identifier.
    */
   addConversation(projectId: string, conversation: ExistingConversation): string;
+  /** Every file the daemon was handed as an attachment, oldest first. */
+  attachments(): FakeAttachment[];
   /** Queues the script for the next message. Unscripted messages get the reply "pong". */
   onNextMessage(script: ReplyScript): void;
   /**

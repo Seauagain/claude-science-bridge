@@ -29,7 +29,7 @@ describe("initializing", () => {
     });
     expect(response.agentCapabilities).toEqual({
       loadSession: true,
-      promptCapabilities: { image: false, audio: false, embeddedContext: false },
+      promptCapabilities: { image: true, audio: false, embeddedContext: true },
       sessionCapabilities: { list: {} },
     });
   });

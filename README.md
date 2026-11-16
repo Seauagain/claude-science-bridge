@@ -219,8 +219,10 @@ and `--provider` names your T3 Code provider if you did not call it `claudeScien
 
 ## Good to know
 
-- **Messages are text.** A file you link in a message is sent as its path. Images and other
-  attachments are not supported yet.
+- **Attachments are copied into the project.** An image or file you attach to a message is
+  handed to Claude Science and kept with the conversation's project, as when you attach it in
+  the Claude Science app. A file you only link in a message is sent as its path. Audio is not
+  supported, and neither is a file too large for Claude Science to take in one upload.
 - **Sub-agents work behind one tool call.** When Claude Science hands work to sub-agents, the
   thread shows the tool call that starts them. Open the conversation in the Claude Science app
   to follow what each sub-agent does.
@@ -263,7 +265,6 @@ project's identifier and name. Neither holds any content of a conversation.
 
 ## Coming next
 
-- Attachments in messages
 - What sub-agents are doing, and the output of a tool while it runs
 - Exporting projects, conversations and artifacts as plain files
 

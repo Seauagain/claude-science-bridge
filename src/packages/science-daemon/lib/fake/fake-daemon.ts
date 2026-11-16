@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
+import { type FakeAttachment, FakeAttachments } from "./fake-attachments.ts";
 import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversation.ts";
 import { FakeConversations } from "./fake-conversations.ts";
 import { FakeEventSockets } from "./fake-event-sockets.ts";
@@ -33,6 +34,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #sockets = new FakeEventSockets();
   readonly #conversations = new FakeConversations((event) => this.#sockets.broadcast(event));
   readonly #projects = new FakeProjects();
+  readonly #attachments = new FakeAttachments();
   readonly #responseOverrides = new Map<string, unknown>();
   /** Sockets whose handshake was left unanswered, kept so that stopping the daemon cuts them. */
   readonly #unansweredHandshakes = new Set<Duplex>();
@@ -114,6 +116,10 @@ class FakeDaemon implements FakeScienceDaemon {
       throw new Error(`fake daemon: there is no project ${projectId} to add a conversation to`);
     }
     return this.#conversations.add(projectId, conversation);
+  }
+
+  attachments(): FakeAttachment[] {
+    return this.#attachments.all();
   }
 
   onNextMessage(script: ReplyScript): void {
@@ -240,6 +246,13 @@ class FakeDaemon implements FakeScienceDaemon {
     const [, resource, id = "", action] =
       /^\/api\/(projects|frames)\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname) ?? [];
     const target = `${request.method} ${resource}/${action ?? ""}`;
+    if (target === "POST projects/attachments") {
+      const projectId = decodeURIComponent(id);
+      // What the daemon answers for a project it does not know is not recorded.
+      return this.#projects.has(projectId)
+        ? this.#attachments.upload(projectId, request)
+        : undocumented("the project of an attachment does not exist");
+    }
     if (target === "POST projects/request") {
       const projectId = decodeURIComponent(id);
       if (!this.#projects.has(projectId)) {

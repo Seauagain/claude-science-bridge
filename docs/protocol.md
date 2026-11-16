@@ -4,7 +4,8 @@ Everything this project knows about the local Claude Science daemon's interface 
 in `src/packages/science-daemon`. The interface is internal and undocumented: treat every
 statement below as an observation about one version, not a contract.
 
-- Observed version: **0.1.53** (macOS arm64), 2026-11-15.
+- Observed version: **0.1.53** (macOS arm64), 2026-11-15. "Attachments" was observed on
+  **0.1.72** (Linux x64), 2026-11-16.
 - The in-repo fake daemon (`science-daemon/testing.ts`) implements exactly what this file says.
   When real behaviour differs, fix this file and the fake first, then the code.
 
@@ -63,6 +64,7 @@ All paths are under `/api`.
 | `POST /request`                                        | `{ target_agent, root_frame_id, frame_id, plan_mode: false, intent_id, input_data: { request: <text> } }` → `{ root_frame_id, frame_id, status }`. Sends a further message to an existing conversation and starts a turn. | **[live]** |
 | `POST /frames/<root_id>/cancel`                        | no body → `{ root_frame_id, cancelled_frames: [ids] }`                                                                                                                                                                    | **[live]** |
 | `POST /frames/<id>/resolve-input`                      | `{ responses: [...] }` → `{ root_frame_id, frame_id, status, race_lost_refusals, remaining_tool_ids }`. Answers input requests. See "Input requests".                                                                     | **[live]** |
+| `POST /projects/<project_id>/attachments`              | `multipart/form-data` with the file in the field `file` → `{ id, version_id, filename, content_type, size_bytes, root_frame_id, created_at, file_path }`. See "Attachments".                                              | **[live]** |
 
 Notes on `POST /request`, all **[live]**:
 
@@ -140,6 +142,38 @@ on the user's computer, or a question.
   `"parked"`), a request of a sub-agent frame, and what a cancel does to a turn that stopped
   to ask. The fake daemon raises parked requests only and drops them with a cancelled turn.
   **[open]**
+
+## Attachments
+
+A file the user sends along with a message. The daemon keeps it with the project.
+
+- **Upload.** `POST /projects/<project_id>/attachments` is a write like any other, but its body
+  is `multipart/form-data` with the file in the field `file`, so it carries no JSON content type.
+  It answers 200 with `{ id, version_id, filename, content_type, size_bytes, root_frame_id,
+  created_at, file_path }`; `root_frame_id` is the project's `uploads` frame. A part without a
+  media type of its own (`application/octet-stream`) gets the one that goes with the file's
+  name. An empty file is refused: 400, `detail: "Cannot upload empty file"`. **[live]**
+- The web client sends a file above a size limit in pieces instead (`POST
+  /artifacts/upload/init`, `/artifacts/upload/chunk`, `/artifacts/upload/finalize`) and takes a
+  413 for "too large for this server". **[web]** Its limit for a single request is 45 MiB unless
+  the daemon's page says otherwise; a single request of 50 MiB was accepted. **[live]** The
+  adapter sends every file in one request and reports the daemon's refusal.
+- **Reference.** A message names its attachments in front of its text: one line that holds, for
+  each attachment, the JSON `{"type":"attachment","id":<id>,"version_id":<version_id>,
+  "filename":<filename>,"artifact_ref":"{{artifact:<version_id>}}","content_type":<content_type>,
+  "size_bytes":<size_bytes>}` with its keys in this order, the references separated by a space,
+  then a line break and the text. A message can be references only. This is what the web
+  client's composer sends. **[web]** for the format, **[live]** for a message sent this way to
+  `POST /projects/<id>/request`: the model saw the image and read the text file.
+- **In the transcript.** The user's message keeps the references as typed, in its first `text`
+  block. The daemon adds blocks after it: for an image, a `text` block `[System] Attached file:
+  <filename>` and an `image` block (`source.type: "_disk_ref"`); for any other file, a `text`
+  block `[System] Attachment available: <filename>. Use read_file(version_id="...") to read it.`
+  These `text` blocks carry no `_harness_notice`. **[live]** The adapter leaves them out and
+  shows a reference as `[Attached: <filename>]`.
+- `POST /request` takes references the same way: a further message with a new attachment was
+  read by the model. **[live]**
+- Not observed: an upload for a project that does not exist. **[open]**
 
 ## Conversations and their messages
 
