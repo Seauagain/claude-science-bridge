@@ -1,5 +1,6 @@
 // @ts-check
 // Deep-module enforcement for dependency-cruiser.
+// Adapted from mattpocock/skills (MIT). See THIRD_PARTY_NOTICES.md.
 //
 // Each package under the packages root is a DEEP MODULE: a lot of behaviour
 // behind a small interface. A package's PUBLIC SURFACE is its ENTRY POINTS:

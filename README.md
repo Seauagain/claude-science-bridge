@@ -35,6 +35,7 @@ Claude Science app whenever you like.
 You need:
 
 - [Node.js](https://nodejs.org) 22 or newer.
+- [pnpm](https://pnpm.io/installation), which installs and builds the bridge.
 - Claude Science installed and running. `csbridge` works with Claude Science 0.1.53.
 
 ## Get started with T3 Code
@@ -46,7 +47,7 @@ git clone https://github.com/Seauagain/claude-science-bridge.git
 cd claude-science-bridge
 pnpm install
 pnpm build
-pnpm link --global
+npm link
 ```
 
 The last line gives you the `csbridge` command. If you prefer not to link it, write
@@ -60,15 +61,17 @@ ok    Science CLI: found
 ok    Daemon: running at http://127.0.0.1:8765
 ok    Daemon version: 0.1.53, tested
 ok    Login: the daemon accepted a login link
+warn  Project link: /Users/you is not linked to a project yet. ...
 ```
 
 If a line says `FAIL`, it also says what to do. Fix that and run the command again. A line that
-says `warn` is a hint and needs no action.
+says `warn` is a hint and needs no action. The last line is about the folder you ran the command
+in, which gets its project in the steps below.
 
 ### 3. Add Claude Science to T3 Code
 
-Open T3 Code's `settings.json` and add a provider. Put in the path of your Node.js program
-(`which node` prints it) and the path of the folder you cloned:
+Open T3 Code's `settings.json` (`~/.t3/userdata/settings.json`) and add a provider. Put in the
+path of your Node.js program (`which node` prints it) and the path of the folder you cloned:
 
 ```json
 "providerInstances": {
@@ -100,6 +103,9 @@ CS-Climate model: nothing to bring in
 Every Claude Science project now shows up in T3 Code as a project named `CS-<project>`, and every
 conversation as a thread that shows its earlier messages and keeps its model and effort. The
 threads arrive already settled, so they do not crowd your list of open work.
+
+The command works through T3 Code's own command line, `t3`, which has to be on your `PATH`.
+T3 Code installs it as `~/.t3/bin/t3`.
 
 Run the command again whenever you like. It brings in only what is new.
 
@@ -214,7 +220,9 @@ and `--provider` names your T3 Code provider if you did not call it `claudeScien
   not saved". Send your next message anyway: the model you picked goes out with it, and the
   picker works as usual from then on.
 - **The bridge keeps itself connected.** If the connection to Claude Science drops, it reconnects
-  and the reply carries on. Text and tool calls from the gap arrive a little late.
+  and the reply carries on. Tool calls and the final answer from the gap arrive a little late.
+  Text written before the last tool call can be missing in your client after such a gap; the
+  conversation in the Claude Science app has all of it.
 
 ## Troubleshooting
 
@@ -239,8 +247,10 @@ the bridge supports, and `git pull && pnpm install && pnpm build` gets you the l
 ## Your data
 
 `csbridge` runs entirely on your machine and talks only to the Claude Science app on it. It logs
-in the same way the browser does and keeps that login in memory. On disk it keeps one small file
-of its own, which lists thread and conversation identifiers and none of their content.
+in the same way the browser does and keeps that login in memory. On disk it keeps two kinds of
+small files: a record in `.csbridge` in your home folder of which thread belongs to which
+conversation, and a marker file `.csbridge/project.json` in each connected folder with the
+project's identifier and name. Neither holds any content of a conversation.
 
 ## Coming next
 
@@ -256,4 +266,4 @@ Science.
 
 ## License
 
-To be decided before the first public release.
+[MIT](./LICENSE)

@@ -1,5 +1,8 @@
 # Issue tracker: GitHub
 
+> Configuration for the agent skills of [mattpocock/skills](https://github.com/mattpocock/skills),
+> from which this file is taken. See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
 ## Conventions

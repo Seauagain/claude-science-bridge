@@ -237,7 +237,7 @@ Rules that follow from what was observed:
 ## Tool activity
 
 What the daemon reports while the assistant uses tools. Observed on a passive socket during
-real turns and in the transcripts of 120 conversations, so **[live]** unless marked.
+real turns and in the transcripts of stored conversations, so **[live]** unless marked.
 
 - **Blocks.** A tool use is a block of an assistant message: `{ type: "tool_use", id, name,
   input }`. `input` holds the tool's arguments and, for nearly every use, `human_description`:

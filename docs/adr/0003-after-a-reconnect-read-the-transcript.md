@@ -24,7 +24,8 @@ has not delivered yet.
 - After a reconnect, text can arrive late, possibly only when the turn ends.
 - In a turn with several assistant messages (a reply that uses tools), text of the earlier
   messages that was streamed during or after the gap is not delivered. It stays in Claude Science.
-  This is stated in the README and is expected to be solved together with showing tool activity.
+  This is stated in the README. Showing tool activity (ADR 0005) brings back the tool calls of
+  such a gap, not the text.
 - Matching "already delivered" text against the transcript is by overlap of characters. A message
   that starts with the same characters the delivered text ends with would lose them. Accepted as
   rare; revisit if it is ever observed.
