@@ -2,7 +2,12 @@
   "name": "claude-science-bridge",
   "version": "0.0.0",
   "private": true,
-  "description": "Unofficial bridge for Claude Science: an ACP adapter for agent UIs, plus a plain-file exporter.",
+  "description": "Unofficial bridge that brings Claude Science into T3 Code, Zed and other Agent Client Protocol clients.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Seauagain/claude-science-bridge.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"

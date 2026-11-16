@@ -1,5 +1,8 @@
 # Domain Docs
 
+> Configuration for the agent skills of [mattpocock/skills](https://github.com/mattpocock/skills),
+> from which this file is taken. See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
 ## Before exploring, read these

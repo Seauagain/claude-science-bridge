@@ -149,6 +149,8 @@ describe("csbridge doctor", () => {
       expect.stringMatching(/^ok +Login: /),
     ]);
     expect(lines[4]).toMatch(/^warn +Project link: .*not linked to a project.*csbridge link/);
+    // Nothing has to be done about it: the folder is linked by the first thread started in it.
+    expect(lines[4]).toMatch(/A thread started in this folder links it by itself/);
     expect(lines[4]).toContain(unlinkedFolder);
     expect(lines).toHaveLength(5);
     expect(exitCode).toBe(0);

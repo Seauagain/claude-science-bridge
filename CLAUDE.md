@@ -24,14 +24,16 @@ daemon. Read these before changing code:
 - Test data is synthetic. No real conversations, project names or personal paths in the repo.
 - Never write into the Claude Science data directory.
 - Do not talk to the real daemon from automated tests. The fake daemon implements `protocol.md`.
-- Sending a message to the real daemon needs the repository owner's explicit go-ahead.
+- Sending a message to the real daemon needs the explicit go-ahead of the person whose Claude
+  Science it is.
 - Code, comments, commit messages and tickets are in English.
 
 ## Agent skills
 
-The engineering skills live in `~/Projects/skills/mattpocock-skills/skills/`. Read a skill's
-`SKILL.md` and follow it when a step calls for it: `engineering/tdd`, `engineering/codebase-design`,
-`engineering/code-review`, `engineering/pr`, `engineering/to-tickets`, `engineering/implement-spec`.
+The engineering skills are those of [mattpocock/skills](https://github.com/mattpocock/skills).
+Read a skill's `SKILL.md` and follow it when a step calls for it: `engineering/tdd`,
+`engineering/codebase-design`, `engineering/code-review`, `engineering/pr`,
+`engineering/to-tickets`, `engineering/implement-spec`.
 
 ### Issue tracker
 

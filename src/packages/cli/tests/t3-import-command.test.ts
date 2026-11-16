@@ -174,6 +174,25 @@ describe("csbridge t3-import", () => {
     expect(t3.started()[0]?.provider).toBe("science");
   });
 
+  it("accepts an option joined to its value by =", async () => {
+    const folding = fake.addProject("Protein folding");
+    fake.addConversation(folding, { title: "Fold of GFP", updatedAt: "2026-11-01T10:00:00Z" });
+    const t3 = t3StandIn();
+
+    const result = await importInto(t3.t3Cli, ["--provider=science", "--prefix=Sci / ", "."]);
+
+    expect(result.exitCode).toBe(0);
+    expect(t3.addedProjects()[0]?.title).toBe("Sci / Protein folding");
+    expect(t3.started()[0]?.provider).toBe("science");
+  });
+
+  it("refuses an option it does not know as wrong usage", async () => {
+    const result = await importInto(t3StandIn().t3Cli, ["--title=Sci", "."]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toMatch(/Unknown option --title\./);
+  });
+
   it("reports a thread that could not be started, goes on with the others, and fails", async () => {
     const folding = fake.addProject("Protein folding");
     const broken = fake.addConversation(folding, {
@@ -190,6 +209,35 @@ describe("csbridge t3-import", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toMatch(/"Breaks".*the provider did not start/);
     expect(result.stdout).toBe("CS-Protein folding: 1 conversation brought in, 1 failed\n");
+  });
+
+  it("fails saying why when T3 Code cannot list a project's threads", async () => {
+    fake.addProject("Protein folding");
+    const t3 = t3StandIn({
+      refuse: (args) =>
+        args.startsWith("thread list") ? "T3 Code server is not reachable" : undefined,
+    });
+
+    const result = await importInto(t3.t3Cli);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(
+      /^T3 Code could not list the threads of .*Protein folding: T3 Code server is not reachable\n$/,
+    );
+  });
+
+  it("fails saying so when T3 Code lists a project's threads as something it cannot read", async () => {
+    fake.addProject("Protein folding");
+    const standIn = t3StandIn();
+    const t3Cli = async (args: readonly string[]) =>
+      args[0] === "thread" && args[1] === "list" ? "not a list" : standIn.t3Cli(args);
+
+    const result = await importInto(t3Cli);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(
+      /^T3 Code could not list the threads of .*Protein folding: its answer is not JSON\.\n$/,
+    );
   });
 
   it("says how to get the T3 command line when there is none", async () => {
