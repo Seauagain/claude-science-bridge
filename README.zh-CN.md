@@ -6,9 +6,9 @@
 
 > 这是一个非官方项目，与 Anthropic 没有关联。“Claude”和“Claude Science”是 Anthropic 的商标。
 
-![T3 Code 里的一个 Claude Science 对话：提问、Claude Science 用到的工具和其中一个工具运行的代码，以及回答](./docs/images/demo.png)
+![T3 Code 里的一个 Claude Science 对话：提问、Claude Science 用到的工具和其中一个工具运行的代码，以及回答](./docs/images/demo.zh-CN.png)
 
-_T3 Code 里的 Claude Science。图中的项目和对话均为虚构。_
+_T3 Code 里的 Claude Science。两个带框的标签是后加的，用来指出 Claude Science 的项目和模型；图中的项目和对话均为虚构。_
 
 ## 为什么需要它
 
