@@ -14,8 +14,9 @@ import {
   ScienceDaemonError,
 } from "../../science-daemon/index.ts";
 import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
+import { FileReferences } from "./file-references.ts";
 import { createFolderProjects } from "./folder-project.ts";
-import { HISTORY_COMMAND, historyUpdates, OPEN_COMMAND } from "./history.ts";
+import { HISTORY_COMMAND, historyUpdates, locatedTranscript, OPEN_COMMAND } from "./history.ts";
 import { conversationsWithoutSession } from "./importable.ts";
 import { askingWayOf } from "./input-requests.ts";
 import { answerPrompt, type Session } from "./prompt.ts";
@@ -115,6 +116,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         cwd: params.cwd,
         clientServers: params.mcpServers,
         toolCalls: new Map(),
+        files: new FileReferences(params.cwd),
       };
       sessions.set(sessionId, session);
       await offerCommands(client, sessionId);
@@ -153,7 +155,11 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         // record. Any other identifier is that of a conversation the client found in the list.
         const conversationId = (await record.conversationOf(sessionId)) ?? sessionId;
         const science = await daemon();
-        const transcript = await science.readTranscript(conversationId);
+        const files = sessions.get(sessionId)?.files ?? new FileReferences(params.cwd);
+        const transcript = await locatedTranscript(
+          await science.readTranscript(conversationId),
+          files,
+        );
         // The client fills the thread from these, so they all go out before the answer.
         for (const update of historyUpdates(transcript)) {
           await client.notify(methods.client.session.update, { sessionId, update });
@@ -163,6 +169,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
           cwd: params.cwd,
           clientServers: params.mcpServers,
           toolCalls: new Map(),
+          files,
           conversationId,
           ...(await science.conversationSettings(conversationId)),
         };

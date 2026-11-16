@@ -138,6 +138,10 @@ While Claude Science works, each tool it uses shows up in the thread as a tool c
 - When the tool finishes, the call is marked completed or failed and holds what the tool gave
   back. For code, that is what the code printed.
 
+A file Claude Science names in a reply opens from the thread, also when it lies outside the
+thread's folder: `csbridge` finds it in the folders the tools worked in and links it by its full
+path.
+
 In T3 Code, tool calls are shown live while the reply is being written. Afterwards they fold into
 a single "Worked for ..." row above the answer. Click the row to see them again, and click a call
 to see its input and output.

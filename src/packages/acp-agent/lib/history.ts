@@ -1,5 +1,24 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import type { TranscriptEntry } from "../../science-daemon/index.ts";
+import type { FileReferences } from "./file-references.ts";
+
+/**
+ * A transcript in which the replies name their files by full paths: see {@link FileReferences}.
+ * `files` learns the folders the transcript's tools worked in on the way.
+ */
+export async function locatedTranscript(
+  transcript: readonly TranscriptEntry[],
+  files: FileReferences,
+): Promise<TranscriptEntry[]> {
+  for (const entry of transcript) {
+    if (entry.type === "tool-use") files.learn(entry.input);
+  }
+  return Promise.all(
+    transcript.map(async (entry) =>
+      entry.type === "reply-text" ? { ...entry, text: await files.located(entry.text) } : entry,
+    ),
+  );
+}
 
 /**
  * Renders a conversation's transcript as the session updates that replay it to a client, in the
