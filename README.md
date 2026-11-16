@@ -10,7 +10,8 @@ Use Claude Science inside T3 Code, Zed, or any other client that speaks the
 
 ![A Claude Science conversation in T3 Code: the question, the tools Claude Science used with the code one of them ran, and the answer](./docs/images/demo.png)
 
-_Claude Science in T3 Code. The projects and the conversation shown are invented._
+_Claude Science in T3 Code. The two framed labels are added to point out the Claude Science
+project and model; the projects and the conversation shown are invented._
 
 ## Why
 
