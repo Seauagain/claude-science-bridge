@@ -32,6 +32,9 @@ export type CommandIo = CliIo & { readonly scienceCli: ScienceCli };
 
 const SCIENCE_CLI_OPTION = "--claude-science-bin";
 
+/** The ways of asking for the usage text, as a command or as an option of any command. */
+const HELP_REQUESTS: ReadonlySet<string> = new Set(["--help", "-h", "help"]);
+
 const USAGE = `Usage: csbridge <command>
 
 Commands:
@@ -47,6 +50,7 @@ Commands:
                   of <folder>, a T3 project for each, and a settled thread per
                   conversation. Run it again to bring in what is new
   csbridge doctor Check the setup and say how to fix what is wrong
+  csbridge help   Print this text
 
 Options:
   ${SCIENCE_CLI_OPTION} <path>
@@ -75,6 +79,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     );
     return 2;
   }
+  if (rest.some((argument, position) => isHelpRequest(argument, position))) {
+    io.stdout.write(USAGE);
+    return 0;
+  }
   const [command, ...args] = rest;
   const scienceCli =
     io.scienceCli ??
@@ -91,6 +99,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
   io.stderr.write(command === undefined ? USAGE : `Unknown command "${command}".\n\n${USAGE}`);
   return 2;
+}
+
+/** `help` asks for the usage only as the command; `--help` and `-h` ask for it wherever they stand. */
+function isHelpRequest(argument: string, position: number): boolean {
+  return HELP_REQUESTS.has(argument) && (position === 0 || argument !== "help");
 }
 
 /**

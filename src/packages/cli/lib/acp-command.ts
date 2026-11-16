@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { createScienceAgent } from "../../acp-agent/index.ts";

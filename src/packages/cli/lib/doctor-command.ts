@@ -36,8 +36,9 @@ async function checkProjectLink(folder: string): Promise<SetupCheck> {
         name,
         status: "warning",
         message:
-          `${folder} is not linked to a project. ` +
-          'Run "csbridge link --project <name>" in the folder you want to open sessions in.',
+          `${folder} is not linked to a project yet. ` +
+          "A thread started in this folder links it by itself, and " +
+          '"csbridge link --project <name>" links it to a project you choose.',
       };
     }
     return {

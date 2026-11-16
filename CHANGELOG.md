@@ -46,6 +46,10 @@ All notable changes to this project are recorded here. The format follows
   opened.
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;
   `CSBRIDGE_START_COMMAND` to name the command that starts Claude Science on this machine.
+- `csbridge --help` (also `-h` and `csbridge help`) prints the usage text.
+- `csbridge t3-import` accepts `--provider=<id>` and `--prefix=<text>` as well as the spaced form.
+- The project is released under the MIT License.
+- `csbridge t3-import` says why in one line when T3 Code cannot list a project's threads.
 
 - Every request to the daemon has a time limit (30 s), so a daemon that accepts connections but
   does not answer cannot hang a prompt.

@@ -146,7 +146,19 @@ async function addProject(t3: T3Cli, title: string, folder: string): Promise<voi
 }
 
 async function existingThreadIds(t3: T3Cli, folder: string): Promise<string[]> {
-  const listed: unknown = JSON.parse(await t3(["thread", "list", "--json", "--project", folder]));
+  const cannotList = `T3 Code could not list the threads of ${folder}`;
+  let answer: string;
+  try {
+    answer = await t3(["thread", "list", "--json", "--project", folder]);
+  } catch (error) {
+    throw new CommandError(`${cannotList}: ${describe(error)}`);
+  }
+  let listed: unknown;
+  try {
+    listed = JSON.parse(answer);
+  } catch {
+    throw new CommandError(`${cannotList}: its answer is not JSON.`);
+  }
   if (!Array.isArray(listed)) return [];
   return listed.flatMap((thread: unknown) =>
     typeof thread === "object" &&
@@ -180,13 +192,16 @@ function readArguments(args: readonly string[]): ImportArguments {
   const folders: string[] = [];
   for (let index = 0; index < args.length; index++) {
     const argument = args[index] ?? "";
-    if (argument === "--provider" || argument === "--prefix") {
-      const value = args[++index];
-      if (value === undefined) throw new UsageError(`${argument} needs a value.\n${USAGE}`);
-      if (argument === "--provider") provider = value;
+    // An option is followed by its value, or joined to it by "=".
+    const joinedAt = argument.startsWith("--") ? argument.indexOf("=") : -1;
+    const option = joinedAt === -1 ? argument : argument.slice(0, joinedAt);
+    if (option === "--provider" || option === "--prefix") {
+      const value = joinedAt === -1 ? args[++index] : argument.slice(joinedAt + 1);
+      if (value === undefined) throw new UsageError(`${option} needs a value.\n${USAGE}`);
+      if (option === "--provider") provider = value;
       else prefix = value;
-    } else if (argument.startsWith("--")) {
-      throw new UsageError(`Unknown option ${argument}.\n${USAGE}`);
+    } else if (option.startsWith("--")) {
+      throw new UsageError(`Unknown option ${option}.\n${USAGE}`);
     } else {
       folders.push(argument);
     }
