@@ -46,6 +46,9 @@ All notable changes to this project are recorded here. The format follows
   opened.
 - `--claude-science-bin` and `CLAUDE_SCIENCE_BIN` to choose the `claude-science` executable;
   `CSBRIDGE_START_COMMAND` to name the command that starts Claude Science on this machine.
+- A file that a reply names relative to the folder Claude Science worked in is named by its full
+  path, found from the folders the conversation's tools were given, so that the client can open
+  it. This also holds for the history of a conversation.
 - `csbridge --help` (also `-h` and `csbridge help`) prints the usage text.
 - `csbridge t3-import` accepts `--provider=<id>` and `--prefix=<text>` as well as the spaced form.
 - The project is released under the MIT License.

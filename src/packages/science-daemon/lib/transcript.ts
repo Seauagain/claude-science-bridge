@@ -18,6 +18,8 @@ export type TranscriptEntry =
       readonly toolName: string;
       /** What the tool was doing, in words meant for the user, when the daemon recorded that. */
       readonly description?: string;
+      /** What the tool was given, when the daemon recorded that. */
+      readonly input?: Readonly<Record<string, unknown>>;
     };
 
 const PAGE_SIZE = 100;
@@ -78,13 +80,14 @@ function entryOf(role: "user" | "assistant", block: JsonRecord): TranscriptEntry
   }
   const toolUse = toolUseOf(block);
   if (toolUse === undefined) return [];
-  const { toolUseId, toolName, description } = toolUse;
+  const { toolUseId, toolName, description, input } = toolUse;
   return [
     {
       type: "tool-use",
       toolUseId,
       toolName,
       ...(description === undefined ? {} : { description }),
+      ...(input === undefined ? {} : { input }),
     },
   ];
 }

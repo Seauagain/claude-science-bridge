@@ -16,8 +16,9 @@ import {
 } from "../../science-daemon/index.ts";
 import { arrangeClientThread } from "./client-thread.ts";
 import { INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
+import type { FileReferences } from "./file-references.ts";
 import type { FolderProjects } from "./folder-project.ts";
-import { HISTORY_COMMAND, historyText, OPEN_COMMAND } from "./history.ts";
+import { HISTORY_COMMAND, historyText, locatedTranscript, OPEN_COMMAND } from "./history.ts";
 import type { AskingWay } from "./input-requests.ts";
 import { promptText } from "./prompt-text.ts";
 import { relayTurn, type ShownToolCalls } from "./relay-turn.ts";
@@ -32,6 +33,8 @@ export interface Session {
   readonly clientServers: readonly McpServer[];
   /** The tool calls the session has shown its client. */
   readonly toolCalls: ShownToolCalls;
+  /** Where the files are that the conversation's replies name. */
+  readonly files: FileReferences;
   /** The model the user chose or the conversation has. Absent: the daemon's default. */
   model?: string;
   /** The effort the user chose or the conversation started with. Absent: the default. */
@@ -100,7 +103,8 @@ export async function answerPrompt(
 
   const cancel = new AbortController();
   session.activePrompt = cancel;
-  const target = { sessionId: request.sessionId, toolCalls: session.toolCalls };
+  const { toolCalls, files } = session;
+  const target = { sessionId: request.sessionId, toolCalls, files };
   try {
     // A conversation that is waiting for the user's approvals or answers takes no message
     // until it has them, so they come first, and with them the rest of the turn that asked.
@@ -170,7 +174,7 @@ async function openConversation(
       update: { sessionUpdate: "config_option_update", configOptions },
     });
   }
-  const response = await showTranscript(transcript, request, surroundings);
+  const response = await showTranscript(transcript, session, request, surroundings);
   const catalog = surroundings.models();
   await arrangeClientThread(
     session.clientServers,
@@ -192,16 +196,17 @@ async function showHistory(
     session.conversationId === undefined
       ? []
       : await (await daemon()).readTranscript(session.conversationId);
-  return showTranscript(transcript, request, { client });
+  return showTranscript(transcript, session, request, { client });
 }
 
 /** Sends a transcript to the client as the reply of a turn. */
 async function showTranscript(
   transcript: readonly TranscriptEntry[],
+  session: Session,
   request: PromptRequest,
   { client }: Pick<PromptSurroundings, "client">,
 ): Promise<PromptResponse> {
-  const pieces = historyText(transcript);
+  const pieces = historyText(await locatedTranscript(transcript, session.files));
   for (const text of pieces.length === 0 ? ["This thread has no earlier messages."] : pieces) {
     await client.notify(methods.client.session.update, {
       sessionId: request.sessionId,

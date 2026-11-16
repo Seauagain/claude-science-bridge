@@ -7,6 +7,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import type { ScienceDaemon, ToolEvent, Turn } from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR } from "./errors.ts";
+import { type FileReferences, PassingText } from "./file-references.ts";
 import { type AskingWay, askUser } from "./input-requests.ts";
 
 /**
@@ -31,29 +32,39 @@ export interface RelayTarget {
   readonly sessionId: string;
   /** The tool calls the session has shown so far. {@link relayTurn} adds the turn's. */
   readonly toolCalls: ShownToolCalls;
+  /** Where the conversation's files are. {@link relayTurn} adds what the turn's tools name. */
+  readonly files: FileReferences;
 }
 
 /**
  * Passes a turn on to the client until it ends: the reply as message text, the reasoning as
  * thoughts, the tool uses as tool calls, and what the daemon asks the user as questions, whose
- * answers go back to the daemon.
+ * answers go back to the daemon. A file the reply names relative to a folder a tool worked in
+ * is named by its full path: see {@link FileReferences}.
  */
 export async function relayTurn(
   turn: Turn,
-  { sessionId, toolCalls }: RelayTarget,
+  { sessionId, toolCalls, files }: RelayTarget,
   cancel: AbortSignal,
   { client, daemon, askingWay }: RelaySurroundings,
 ): Promise<PromptResponse> {
   const show = (update: SessionUpdate) =>
     client.notify(methods.client.session.update, { sessionId, update });
-  const say = (text: string) =>
-    show({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+  const say = async (text: string) => {
+    if (text === "") return;
+    await show({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+  };
+  const reply = new PassingText(files);
 
   // Once the client has cancelled, the turn has no more events but its end, as cancelled.
   for await (const event of turn.events) {
     if (event.type === "reply-text") {
-      await say(event.text);
-    } else if (event.type === "reasoning-text") {
+      await say(await reply.add(event.text));
+      continue;
+    }
+    // Text that was held back for the rest of a code span goes out before anything else does.
+    await say(await reply.end());
+    if (event.type === "reasoning-text") {
       await show({
         sessionUpdate: "agent_thought_chunk",
         content: { type: "text", text: event.text },
@@ -74,6 +85,8 @@ export async function relayTurn(
         }
       }
     } else if (event.type !== "ended") {
+      files.learn(event.toolUse.input);
+      if (event.type === "tool-ended") files.learn(event.output);
       const update = toolCallUpdate(event, toolCalls);
       if (update !== undefined) await show(update);
     } else if (event.outcome === "failed") {
