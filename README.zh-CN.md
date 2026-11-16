@@ -6,6 +6,10 @@
 
 > 这是一个非官方项目，与 Anthropic 没有关联。“Claude”和“Claude Science”是 Anthropic 的商标。
 
+![T3 Code 里的一个 Claude Science 对话：提问、Claude Science 用到的工具和其中一个工具运行的代码，以及回答](./docs/images/demo.png)
+
+_T3 Code 里的 Claude Science。图中的项目和对话均为虚构。_
+
 ## 为什么需要它
 
 Claude Science 单独开在一个浏览器标签页里。如果你平时已经在一个窗口里同时用好几个 agent，就得来回切换，Claude Science 的项目也和其他工作分在两处。

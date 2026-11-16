@@ -8,6 +8,10 @@ Use Claude Science inside T3 Code, Zed, or any other client that speaks the
 > An unofficial project, not affiliated with Anthropic. "Claude" and "Claude Science" are
 > trademarks of Anthropic.
 
+![A Claude Science conversation in T3 Code: the question, the tools Claude Science used with the code one of them ran, and the answer](./docs/images/demo.png)
+
+_Claude Science in T3 Code. The projects and the conversation shown are invented._
+
 ## Why
 
 Claude Science lives in a browser tab of its own. If you already work with several agents in one
