@@ -9,7 +9,20 @@ export interface DaemonHttp {
   /** `path` is relative to `/api` and starts with a slash. Returns the parsed JSON body. */
   get(path: string): Promise<unknown>;
   post(path: string, body?: unknown): Promise<unknown>;
+  /** Sends one file as a `multipart/form-data` body, in its field `file`. */
+  upload(path: string, file: UploadedFile): Promise<unknown>;
 }
+
+/** A file for {@link DaemonHttp.upload}. */
+export interface UploadedFile {
+  readonly name: string;
+  /** The file's media type, or an empty string to let the daemon tell by the name. */
+  readonly mimeType: string;
+  readonly data: Uint8Array;
+}
+
+/** What a request carries: nothing, a JSON value, or a file. */
+type Payload = { readonly json: unknown } | { readonly file: UploadedFile } | undefined;
 
 interface HttpAnswer {
   readonly status: number;
@@ -27,13 +40,14 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
     login: Login,
     method: "GET" | "POST",
     path: string,
-    body: unknown,
+    payload: Payload,
   ): Promise<HttpAnswer> => {
     const { endpoint } = access;
     const headers: Record<string, string> = { cookie: login.cookieHeader };
     if (method === "POST") {
       // Writes need the CSRF header and the daemon's own origin. See docs/protocol.md.
-      headers["content-type"] = "application/json";
+      // A file goes out as a form, whose content type `fetch` writes with its boundary.
+      if (payload === undefined || "json" in payload) headers["content-type"] = "application/json";
       headers["x-operon-csrf"] = login.csrfToken;
       headers.origin = endpoint.origin;
     }
@@ -42,13 +56,13 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
         method,
         headers,
         signal,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...bodyOf(payload),
       });
       return { status: response.status, ok: response.ok, text: await response.text() };
     });
   };
 
-  const send = async (method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> => {
+  const send = async (method: "GET" | "POST", path: string, body?: Payload): Promise<unknown> => {
     const call = `${method} ${path}`;
     const login = access.login;
     let answer = await exchange(login, method, path, body);
@@ -79,8 +93,21 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
 
   return {
     get: (path) => send("GET", path),
-    post: (path, body) => send("POST", path, body),
+    post: (path, body) => send("POST", path, body === undefined ? undefined : { json: body }),
+    upload: (path, file) => send("POST", path, { file }),
   };
+}
+
+/** The `fetch` body of a payload. A form is built anew for each attempt. */
+function bodyOf(payload: Payload): { body?: string | FormData } {
+  if (payload === undefined) return {};
+  if ("json" in payload)
+    return payload.json === undefined ? {} : { body: JSON.stringify(payload.json) };
+  const { name, mimeType, data } = payload.file;
+  const form = new FormData();
+  // Copied, because a `Blob` takes only bytes that are known not to be shared memory.
+  form.append("file", new Blob([new Uint8Array(data)], { type: mimeType }), name);
+  return { body: form };
 }
 
 /** Whether the daemon refused a write only because its CSRF token must be fetched anew. */

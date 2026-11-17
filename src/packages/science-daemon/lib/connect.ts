@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DaemonAccess } from "./access.ts";
+import { type AttachmentFile, messageWithAttachments } from "./attachments.ts";
 import { unlessCancelled } from "./cancellation.ts";
 import { readConversationState, readInputRequests } from "./conversation-state.ts";
 import { type Conversation, listConversations } from "./conversations.ts";
@@ -78,10 +79,12 @@ export interface ScienceDaemon {
   /**
    * Starts a new conversation in a project with its first message, and with it the first turn.
    * `settings` names the model and effort the conversation gets; what is left out is the
-   * daemon's default.
+   * daemon's default. `attachments` are files to send along: the daemon keeps them with the
+   * project, and the conversation can read them.
    * Aborting `cancel` stops the reply: see {@link Turn.events}.
    *
-   * @throws ScienceDaemonError when the daemon refuses the message or cannot be reached, and
+   * @throws ScienceDaemonError when the daemon refuses the message or one of its attachments (as
+   *   it does an empty file or one too large for it) or cannot be reached, and
    *   with kind `cancelled` when `cancel` was aborted before the message was sent. The message
    *   is then not sent at all, and the rejection does not wait for the connection.
    */
@@ -90,12 +93,14 @@ export interface ScienceDaemon {
     message: string,
     cancel: AbortSignal,
     settings?: ConversationSettings,
+    attachments?: readonly AttachmentFile[],
   ): Promise<Turn>;
   /**
    * Sends a further message to an existing conversation, and with it starts the next turn.
    * The conversation's previous turn must have ended. Aborting `cancel` stops the reply: see
    * {@link Turn.events}. A model named in `settings` is used from this message on; an effort is
-   * not, because the daemon keeps the effort a conversation started with.
+   * not, because the daemon keeps the effort a conversation started with. `attachments` are as
+   * for {@link ScienceDaemon.startConversation}.
    *
    * @throws ScienceDaemonError as {@link ScienceDaemon.startConversation} does, and with kind
    *   `awaiting-answer` when the daemon takes no message because it waits for an answer that
@@ -106,6 +111,7 @@ export interface ScienceDaemon {
     message: string,
     cancel: AbortSignal,
     settings?: ConversationSettings,
+    attachments?: readonly AttachmentFile[],
   ): Promise<Turn>;
   /**
    * Follows the turn of a conversation that stopped to ask the user for approvals or answers
@@ -199,25 +205,36 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
       await socket.ready();
       return readConversationSettings(http, conversationId);
     },
-    startConversation: (projectId, message, cancel, settings = {}) =>
+    startConversation: (projectId, message, cancel, settings = {}, attachments = []) =>
       startTurn(channel, cancel, async () => {
         const call = "POST /projects/<id>/request";
+        const request = await messageWithAttachments(http, projectId, message, attachments);
         const response = expectRecord(
           await http.post(`/projects/${encodeURIComponent(projectId)}/request`, {
-            input_data: { request: message },
+            input_data: { request },
             ...settings,
           }),
           call,
         );
         return expectString(response, "root_frame_id", call);
       }),
-    sendMessage: (conversationId, message, cancel, settings = {}) =>
+    sendMessage: (conversationId, message, cancel, settings = {}, attachments = []) =>
       startTurn(channel, cancel, async () => {
         const frameCall = "GET /frames/<id>";
         const frame = expectRecord(
           await http.get(`/frames/${encodeURIComponent(conversationId)}?shallow=true`),
           frameCall,
         );
+        // Attachments belong to a project: the conversation's own.
+        const request =
+          attachments.length === 0
+            ? message
+            : await messageWithAttachments(
+                http,
+                expectString(frame, "project_id", frameCall),
+                message,
+                attachments,
+              );
         await http
           .post("/request", {
             target_agent: expectString(frame, "agent_name", frameCall),
@@ -225,7 +242,7 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
             frame_id: conversationId,
             plan_mode: false,
             intent_id: randomUUID(),
-            input_data: { request: message },
+            input_data: { request },
             ...(settings.model === undefined ? {} : { model: settings.model }),
           })
           .catch(rethrowAwaitingAnswer);

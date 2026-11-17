@@ -13,6 +13,10 @@ obtain a login link.
 **Conversation**: one thread of messages between the user and Claude Science inside a project.
 On the wire it is a root frame. _Avoid_: chat, thread (a thread is the ACP client's word).
 
+**Attachment**: a file the user sends along with a message. The daemon keeps it with the
+conversation's project, and the message names it by a **reference**. _Avoid_: upload (the act,
+not the file).
+
 **Frame**: the daemon's unit of agent execution. A conversation is a root frame; work delegated to
 a sub-agent runs in a child frame.
 

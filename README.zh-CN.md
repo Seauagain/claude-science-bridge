@@ -181,7 +181,7 @@ $ csbridge link --all ~/science-projects
 
 ## 使用须知
 
-- **消息是纯文本。** 消息里链接的文件会以路径的形式发送。图片和其他附件暂不支持。
+- **附件会复制到项目里。** 消息中附带的图片或文件会交给 Claude Science，并保存在对话所属的项目中，与在 Claude Science 应用里添加附件相同。仅在消息里链接的文件仍以路径的形式发送。暂不支持音频，也不支持超过 Claude Science 单次上传上限的文件。
 - **子 agent 在一次工具调用背后工作。** Claude Science 把工作交给子 agent 时，线程里显示启动它们的那次工具调用。想看每个子 agent 的具体过程，在 Claude Science 应用里打开这个对话。
 - **工具结束后才显示输出。** 运行时间长的工具在结束前一直显示为进行中。
 - **在 T3 Code 里给已完成的线程换模型。** T3 Code 可能提示“This model pick was not saved”。照常发送下一条消息即可：你选的模型会随消息一起生效，之后选择器恢复正常。
@@ -209,7 +209,6 @@ $ csbridge link --all ~/science-projects
 
 ## 后续计划
 
-- 消息中的附件
 - 子 agent 的工作过程，以及工具运行中的实时输出
 - 把项目、对话和产物导出为普通文件
 

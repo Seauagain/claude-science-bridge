@@ -158,10 +158,10 @@ describe("prompting a session", () => {
 
     const failure = harness.withClient(async (context) => {
       const session = await context.buildSession(folder).start();
-      return session.prompt({ type: "image", data: "AAAA", mimeType: "image/png" });
+      return session.prompt({ type: "audio", data: "AAAA", mimeType: "audio/wav" });
     });
 
-    await expect(failure).rejects.toThrow(/accept text only.*"image"/);
+    await expect(failure).rejects.toThrow(/take text, images and files.*"audio"/);
     expect(harness.fake.conversations()).toEqual([]);
   });
 

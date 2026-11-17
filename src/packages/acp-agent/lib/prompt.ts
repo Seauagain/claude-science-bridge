@@ -20,7 +20,7 @@ import type { FileReferences } from "./file-references.ts";
 import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, locatedTranscript, OPEN_COMMAND } from "./history.ts";
 import type { AskingWay } from "./input-requests.ts";
-import { promptText } from "./prompt-text.ts";
+import { type PromptContent, promptContent, promptWords } from "./prompt-content.ts";
 import { relayTurn, type ShownToolCalls } from "./relay-turn.ts";
 import type { SessionRecord } from "./session-record.ts";
 import { settingsInForce } from "./settings.ts";
@@ -92,7 +92,7 @@ export async function answerPrompt(
     );
   }
 
-  const text = promptText(request.prompt).trim();
+  const text = promptWords(request.prompt).trim();
   if (text === `/${HISTORY_COMMAND.name}`) {
     return showHistory(session, request, surroundings).catch(rethrowAsRequestError);
   }
@@ -106,6 +106,8 @@ export async function answerPrompt(
   const { toolCalls, files } = session;
   const target = { sessionId: request.sessionId, toolCalls, files };
   try {
+    // Read before anything is asked of the daemon: a prompt that cannot be sent starts nothing.
+    const content = await promptContent(request.prompt);
     // A conversation that is waiting for the user's approvals or answers takes no message
     // until it has them, so they come first, and with them the rest of the turn that asked.
     const waiting =
@@ -121,7 +123,7 @@ export async function answerPrompt(
         update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "\n\n" } },
       });
     }
-    const turn = await sendPrompt(session, request, cancel.signal, surroundings);
+    const turn = await sendPrompt(session, request, content, cancel.signal, surroundings);
     return await relayTurn(turn, target, cancel.signal, surroundings);
   } catch (error) {
     // ACP wants a cancelled prompt answered as cancelled, whatever went wrong afterwards.
@@ -220,14 +222,20 @@ async function showTranscript(
 async function sendPrompt(
   session: Session,
   request: PromptRequest,
+  { text: message, attachments }: PromptContent,
   cancel: AbortSignal,
   { client, daemon, projectOf, record, models }: PromptSurroundings,
 ): Promise<Turn> {
-  const message = promptText(request.prompt);
   if (session.conversationId !== undefined) {
     // A model the user picked since the last message is used from this one on.
     const settings = session.model === undefined ? {} : { model: session.model };
-    return (await daemon()).sendMessage(session.conversationId, message, cancel, settings);
+    return (await daemon()).sendMessage(
+      session.conversationId,
+      message,
+      cancel,
+      settings,
+      attachments,
+    );
   }
   // The folder's project is settled now and not when the session is opened: a client opens
   // sessions in folders of its own choosing just to find out what the agent can do, and those
@@ -241,7 +249,13 @@ async function sendPrompt(
   }
   const catalog = models();
   const settings = catalog === undefined ? {} : settingsInForce(catalog, session);
-  const turn = await (await daemon()).startConversation(projectId, message, cancel, settings);
+  const turn = await (await daemon()).startConversation(
+    projectId,
+    message,
+    cancel,
+    settings,
+    attachments,
+  );
   session.conversationId = turn.conversationId;
   // What the conversation started with is what the session shows from now on.
   Object.assign(session, settings);
