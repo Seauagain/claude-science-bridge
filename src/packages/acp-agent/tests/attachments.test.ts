@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { symlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { methods } from "@agentclientprotocol/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Harness, startHarness } from "./support/harness.ts";
@@ -85,7 +85,7 @@ describe("attaching files to a prompt", () => {
 
   it("sends a file the client saved on this computer and named in the text", async () => {
     const { folder, projectId } = await harness.linkedFolder("Protein folding");
-    const saved = join(await harness.temporaryFolder(), "0f3a-screen.csv");
+    const saved = join(harness.attachmentFolder, "0f3a-screen.csv");
     await writeFile(saved, "well,signal\nA1,0.82\n");
 
     await harness.withClient(async (context) => {
@@ -115,7 +115,7 @@ describe("attaching files to a prompt", () => {
 
   it("sends a saved image once when the client also sends it as an image", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
-    const saved = join(await harness.temporaryFolder(), "7c1d-gel.png");
+    const saved = join(harness.attachmentFolder, "7c1d-gel.png");
     await writeFile(saved, PIXELS);
 
     await harness.withClient(async (context) => {
@@ -146,6 +146,27 @@ describe("attaching files to a prompt", () => {
 
     expect(uploads()).toEqual([]);
     expect(harness.fake.conversations()[0]?.messages).toEqual([`Summarise it.\n\n${line}`]);
+  });
+
+  it("leaves a line that names a file outside the client's attachment folder as it is", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    const elsewhere = join(await harness.temporaryFolder(), "notes.txt");
+    await writeFile(elsewhere, "not attached by the user");
+    const reached = join(harness.attachmentFolder, "link.txt");
+    await symlink(elsewhere, reached);
+    const lines = [
+      `[Attached file "notes.txt" is saved at: ${elsewhere}]`,
+      `[Attached file "up.txt" is saved at: ${harness.attachmentFolder}/../${basename(dirname(elsewhere))}/notes.txt]`,
+      `[Attached file "link.txt" is saved at: ${reached}]`,
+    ].join("\n");
+
+    await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return session.prompt(`Summarise it.\n\n${lines}`);
+    });
+
+    expect(uploads()).toEqual([]);
+    expect(harness.fake.conversations()[0]?.messages).toEqual([`Summarise it.\n\n${lines}`]);
   });
 
   it("sends an embedded resource as a file, text or bytes", async () => {

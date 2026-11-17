@@ -42,6 +42,8 @@ export interface Harness {
   readonly stateFolder: string;
   /** Creates an empty temporary folder that is removed with the harness. */
   temporaryFolder(): Promise<string>;
+  /** The folder the harness's agents take a client to save the attachments of a prompt in. */
+  readonly attachmentFolder: string;
   /**
    * Runs `use` as an ACP client connected to an agent of its own, already initialized. Each call
    * stands for one adapter process: a second call is the adapter the client starts anew, on the
@@ -99,6 +101,7 @@ export async function startHarness(): Promise<Harness> {
     return folder;
   };
   const stateFolder = join(await newFolder(), "state");
+  const attachmentFolder = await newFolder();
   const received: SessionNotification[] = [];
   const forms: CreateElicitationRequest[] = [];
   let fill: Parameters<Harness["answerForms"]>[0] = () => {
@@ -137,6 +140,7 @@ export async function startHarness(): Promise<Harness> {
     },
     stateFolder,
     temporaryFolder: newFolder,
+    attachmentFolder,
     async withClient(use, options = {}) {
       const scienceCli = options.scienceCli ?? fake.scienceCli;
       const connections: Promise<ScienceDaemon>[] = [];
@@ -147,6 +151,7 @@ export async function startHarness(): Promise<Harness> {
           return connection;
         },
         stateFolder: options.stateFolder ?? stateFolder,
+        attachmentFolders: [attachmentFolder],
         version: "0.0.0-test",
       });
       try {

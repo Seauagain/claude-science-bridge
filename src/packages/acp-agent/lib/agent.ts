@@ -38,6 +38,11 @@ export interface ScienceAgentOptions {
    * Science data folder.
    */
   readonly stateFolder: string;
+  /**
+   * The folders the client saves the attachments of a prompt in. A file that a prompt names in
+   * its text instead of sending it is read from these folders only.
+   */
+  readonly attachmentFolders: readonly string[];
   /** This program's version, reported to the client. */
   readonly version: string;
 }
@@ -205,6 +210,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         // Every session asked for the models when it was set up; a prompt does not ask again.
         models: () => knownModels,
         askingWay,
+        attachmentFolders: options.attachmentFolders,
         options: (current) =>
           knownModels === undefined ? undefined : settingsOptions(knownModels, current),
       });

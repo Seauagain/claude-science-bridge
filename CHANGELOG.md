@@ -11,7 +11,9 @@ All notable changes to this project are recorded here. The format follows
 - Attachments: an image or file in a prompt is handed to Claude Science and named in the message
   the way its own app does. Images and embedded resources are taken from the prompt; a file that
   T3 Code saved on the computer and named in the prompt's text is read and sent as well. A
-  conversation read back shows each attachment as `[Attached: <file name>]`.
+  conversation read back shows each attachment as `[Attached: <file name>]`. A file named in
+  the text is read from T3 Code's attachment folders only (`~/.t3`, or the home `T3CODE_HOME`
+  names), so pasted text cannot make the adapter send any other file.
 - `csbridge acp`: an ACP agent that fronts the local Claude Science daemon. A session belongs to
   the project its working folder is linked to; its first prompt starts a conversation there and
   later prompts continue it. Replies stream as message chunks. A reply can be cancelled. Several
