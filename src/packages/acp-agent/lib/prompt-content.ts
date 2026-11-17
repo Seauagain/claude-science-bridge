@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { basename, isAbsolute } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { basename, isAbsolute, relative, sep } from "node:path";
 import { type ContentBlock, RequestError } from "@agentclientprotocol/sdk";
 import type { AttachmentFile } from "../../science-daemon/index.ts";
 import { INVALID_PARAMS } from "./errors.ts";
@@ -27,19 +27,22 @@ export function promptWords(blocks: readonly ContentBlock[]): string {
 /**
  * Renders an ACP prompt as the message Claude Science receives. Text is passed through and
  * links to resources are sent as their URI, each on its own line. Images and embedded resources
- * become attachments, and so does a file that a client saved on this computer and named in the
- * text instead of sending it: see {@link savedFiles}.
+ * become attachments, and so does a file that a client saved in one of `attachmentFolders` and
+ * named in the text instead of sending it: see {@link savedFiles}.
  *
  * @throws RequestError (invalid params) for content the adapter cannot pass on, such as audio.
  */
-export async function promptContent(blocks: readonly ContentBlock[]): Promise<PromptContent> {
+export async function promptContent(
+  blocks: readonly ContentBlock[],
+  attachmentFolders: readonly string[],
+): Promise<PromptContent> {
   const texts: string[] = [];
   const saved: AttachmentFile[] = [];
   const sent: AttachmentFile[] = [];
   let images = 0;
   for (const block of blocks) {
     if (block.type === "text") {
-      const { text, files } = await savedFiles(block.text);
+      const { text, files } = await savedFiles(block.text, attachmentFolders);
       texts.push(text);
       saved.push(...files);
     } else if (block.type === "resource_link") {
@@ -80,19 +83,20 @@ const SAVED_FILE =
   /^\[Attached (?:image|file) "(.*)" is saved at: (.+?)(?: \(text extracted to: .+\))?\]$/;
 
 /**
- * Takes the files out of a text that names them as saved on this computer. A file that can be
- * read becomes an attachment and its line is dropped; any other line stays as it is.
+ * Takes the files out of a text that names them as saved on this computer. A file that lies in
+ * one of `folders` and can be read becomes an attachment and its line is dropped; any other line
+ * stays as it is.
  */
-async function savedFiles(text: string): Promise<{ text: string; files: AttachmentFile[] }> {
+async function savedFiles(
+  text: string,
+  folders: readonly string[],
+): Promise<{ text: string; files: AttachmentFile[] }> {
   const files: AttachmentFile[] = [];
   const kept: string[] = [];
   for (const line of text.split("\n")) {
     const [, name, path] = SAVED_FILE.exec(line) ?? [];
     const data =
-      name === undefined || path === undefined || !isAbsolute(path)
-        ? undefined
-        : // A file that cannot be read is no failure of the prompt: its line is sent as it is.
-          await readFile(path).catch(() => undefined);
+      name === undefined || path === undefined ? undefined : await savedFile(path, folders);
     if (data === undefined || name === undefined) {
       kept.push(line);
     } else {
@@ -109,6 +113,29 @@ async function savedFiles(text: string): Promise<{ text: string; files: Attachme
       .trim(),
     files,
   };
+}
+
+/**
+ * The content of a file a client saved in one of `folders`. Nothing for a path anywhere else:
+ * a prompt can hold a line in a client's wording that the client did not write, such as pasted
+ * text, and that line must not send a file the user never attached. Nothing either for a file
+ * that cannot be read, which is no failure of the prompt. See ADR 0008.
+ */
+async function savedFile(path: string, folders: readonly string[]): Promise<Buffer | undefined> {
+  if (!isAbsolute(path)) return undefined;
+  // Links are followed before the comparison, so that a path cannot leave a folder through one.
+  const file = await realpath(path).catch(() => undefined);
+  if (file === undefined) return undefined;
+  for (const folder of folders) {
+    const root = await realpath(folder).catch(() => undefined);
+    if (root !== undefined && isInside(root, file)) return readFile(file).catch(() => undefined);
+  }
+  return undefined;
+}
+
+function isInside(folder: string, file: string): boolean {
+  const [first] = relative(folder, file).split(sep);
+  return first !== undefined && first !== "" && first !== ".." && !isAbsolute(first);
 }
 
 /** The file name a URI ends in, when it has one. */

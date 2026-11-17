@@ -42,6 +42,7 @@ path alone is of no use to it.
 - The adapter reads a file from the user's computer because a line of the prompt names it. The
   prompt comes from the user's own client and the file goes to the user's own daemon on
   loopback, but text pasted into a prompt in exactly that wording would have the same effect.
+  ADR 0008 limits this to the folders T3 Code saves attachments in.
 - The wording is T3 Code's and can change with any release: when it does, its lines are passed
   on as text again and only images still arrive, as blocks. Revisit when T3 Code sends files as
   embedded resources, or offers a way to tell which agent wants what.

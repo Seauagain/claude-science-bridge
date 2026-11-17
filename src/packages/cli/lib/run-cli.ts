@@ -65,6 +65,9 @@ Environment:
   CSBRIDGE_STATE_DIR
                   The folder csbridge keeps its own state in: which session belongs to
                   which conversation. Default: .csbridge in your home folder
+  T3CODE_HOME
+                  T3 Code's home folder. A file attached to a message in T3 Code is read
+                  from there. Default: .t3 in your home folder
 `;
 
 /**

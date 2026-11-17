@@ -73,6 +73,8 @@ export interface PromptSurroundings {
   readonly options: (session: Session) => SessionConfigOption[] | undefined;
   /** How this client is asked what the daemon asks the user. */
   readonly askingWay: AskingWay;
+  /** The folders a file named in a prompt's text is read from. */
+  readonly attachmentFolders: readonly string[];
 }
 
 /**
@@ -107,7 +109,7 @@ export async function answerPrompt(
   const target = { sessionId: request.sessionId, toolCalls, files };
   try {
     // Read before anything is asked of the daemon: a prompt that cannot be sent starts nothing.
-    const content = await promptContent(request.prompt);
+    const content = await promptContent(request.prompt, surroundings.attachmentFolders);
     // A conversation that is waiting for the user's approvals or answers takes no message
     // until it has them, so they come first, and with them the rest of the turn that asked.
     const waiting =

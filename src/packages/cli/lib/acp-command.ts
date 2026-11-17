@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { createScienceAgent } from "../../acp-agent/index.ts";
 import { connectScienceDaemon, type ScienceDaemon } from "../../science-daemon/index.ts";
+import { attachmentFolders } from "./attachment-folders.ts";
 import { daemonSetup } from "./daemon-setup.ts";
 import type { CommandIo } from "./run-cli.ts";
 import { stateFolder } from "./state-folder.ts";
@@ -23,6 +24,7 @@ export async function runAcpCommand(io: CommandIo): Promise<number> {
       return connection;
     },
     stateFolder: stateFolder(io),
+    attachmentFolders: attachmentFolders(io),
     version: await readVersion(),
   });
   const stream = ndJsonStream(Writable.toWeb(io.stdout), Readable.toWeb(io.stdin));
