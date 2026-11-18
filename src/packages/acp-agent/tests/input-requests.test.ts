@@ -404,6 +404,154 @@ describe("a request this client cannot answer", () => {
   });
 });
 
+describe("a request for a contact email address", () => {
+  const NOTICE =
+    "Some research data services ask for a contact email.\n\nIf you decline, none is sent.";
+
+  /** The daemon asks for a contact email address, then says what came of it. */
+  function askForEmail(also: readonly Record<string, unknown>[] = []) {
+    harness.fake.onNextMessage(async (turn) => {
+      turn.replyText("Looking up the paper. ");
+      const [answer] = await turn.ask([
+        { kind: "contact_email", notice_text: NOTICE, notice_version: "v1" },
+        ...also,
+      ]);
+      turn.replyText(answer?.approved === true ? `Using ${String(answer.text)}.` : "No email.");
+      turn.complete();
+    });
+  }
+
+  it("is put in the thread with the daemon's notice, and ends the prompt until the user answers", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    const { chunks, stopReason } = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      return runTurn(session, "Find the paper");
+    });
+
+    expect(chunks.join("")).toBe(
+      "Looking up the paper. " +
+        `**Claude Science asks for a contact email address.**\n\n${NOTICE}\n\n` +
+        "Send the address as your next message, or send `decline` to share none and not be " +
+        "asked again, or `skip` to decide later.\n\n",
+    );
+    expect(stopReason).toBe("end_turn");
+    expect(harness.permissionRequests()).toEqual([]);
+    expect(harness.fake.inputResponses()).toEqual([]);
+  });
+
+  it("takes the next message as the address, and does not send it as a message", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    const second = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      return runTurn(session, " ada@example.org ");
+    });
+
+    expect(harness.fake.inputResponses()).toMatchObject([
+      { approved: true, action: "allow", text: "ada@example.org" },
+    ]);
+    expect(harness.fake.inputResponses()[0]).not.toHaveProperty("scope");
+    // The rest of the turn that had asked, and nothing after it.
+    expect(second.chunks.join("")).toBe("Using ada@example.org.");
+    expect(second.stopReason).toBe("end_turn");
+    expect(harness.fake.conversations()[0]?.messages).toEqual(["Find the paper"]);
+  });
+
+  it("leaves out what the client adds to a prompt after the user's own words", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      return session.prompt([
+        { type: "text", text: "ada@example.org" },
+        { type: "text", text: "<runtime_info>In T3 Code.</runtime_info>" },
+      ]);
+    });
+
+    expect(harness.fake.inputResponses()).toMatchObject([
+      { action: "allow", text: "ada@example.org" },
+    ]);
+  });
+
+  it.each([
+    ["decline", { approved: false, action: "deny" }],
+    ["Skip", { approved: false, action: "cancel" }],
+  ])("takes the word %s as the answer it stands for", async (word, response) => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    const second = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      return runTurn(session, word);
+    });
+
+    expect(harness.fake.inputResponses()).toMatchObject([response]);
+    expect(second.chunks.join("")).toBe("No email.");
+    expect(harness.fake.conversations()[0]?.messages).toEqual(["Find the paper"]);
+  });
+
+  it("asks again for a message that is no address, and sends the daemon nothing", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    const second = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      return runTurn(session, "why do you need it?");
+    });
+
+    expect(second.chunks.join("")).toBe(
+      "That is not what Claude Science asked for. Send the address as your next message, " +
+        "or send `decline` to share none and not be asked again, or `skip` to decide later.\n\n",
+    );
+    expect(second.stopReason).toBe("end_turn");
+    expect(harness.fake.inputResponses()).toEqual([]);
+    expect(harness.fake.conversations()[0]?.messages).toEqual(["Find the paper"]);
+  });
+
+  it("is settled before a request with choices of the same turn, and both are answered together", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail([{ kind: "host", target: "/data/genomes", requested_mode: "ro" }]);
+    harness.answerPermissions(pick("allow:ro"));
+
+    await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      // Nothing is asked with buttons while the address is still to come.
+      expect(harness.permissionRequests()).toEqual([]);
+      return runTurn(session, "ada@example.org");
+    });
+
+    expect(harness.permissionRequests()).toHaveLength(1);
+    expect(harness.fake.inputResponses()).toMatchObject([
+      { action: "allow", text: "ada@example.org" },
+      { action: "allow", mode: "ro" },
+    ]);
+  });
+
+  it("sends a later message as a message again", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmail();
+
+    const third = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Find the paper");
+      await runTurn(session, "ada@example.org");
+      return runTurn(session, "Are you there?");
+    });
+
+    expect(third.chunks.join("")).toBe("pong");
+    expect(harness.fake.conversations()[0]?.messages).toEqual(["Find the paper", "Are you there?"]);
+  });
+});
+
 describe("what the question says about a request for folder access", () => {
   it("names the access the folder has already and the path that was asked for", async () => {
     const { folder } = await harness.linkedFolder("Protein folding");
@@ -434,34 +582,60 @@ describe("what the question says about a request for folder access", () => {
 });
 
 describe("a question that lets several choices be picked", () => {
-  it("is left to Claude Science, as a question with one choice to pick is not", async () => {
-    const { folder } = await harness.linkedFolder("Protein folding");
+  /** The daemon asks which organisms, then says what it was told. */
+  function askWhichOrganisms() {
     harness.fake.onNextMessage(async (turn) => {
-      await turn.ask([
+      const [answer] = await turn.ask([
         {
           kind: "ask",
           questions: [
             {
               question: "Which organisms?",
-              options: [{ label: "Human" }, { label: "Mouse" }],
+              options: [{ label: "Human" }, { label: "Mouse" }, { label: "Zebrafish" }],
               multi_select: true,
             },
           ],
         },
       ]);
-      turn.replyText("Thanks.");
+      turn.replyText(answer?.approved === true ? "Aligning." : "No organisms.");
       turn.complete();
     });
+  }
 
-    const { chunks } = await harness.withClient(async (context) => {
+  it("is put in the thread with its options, to be answered by the next message", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askWhichOrganisms();
+
+    const { chunks, stopReason } = await harness.withClient(async (context) => {
       const session = await context.buildSession(folder).start();
-      return runTurn(session, "Align the reads", (chunk) => {
-        if (chunk.includes("Claude Science")) harness.fake.answerInBrowser(true);
-      });
+      return runTurn(session, "Align the reads");
     });
 
     expect(harness.permissionRequests()).toEqual([]);
-    expect(chunks[0]).toMatch(/waiting for an answer to its questions.*in Claude Science/s);
+    expect(chunks.join("")).toBe(
+      "**Which organisms?**\n\n" +
+        "Name one or more of these, separated by commas, or answer in your own words:\n" +
+        "- Human\n- Mouse\n- Zebrafish\n\n" +
+        "Send your answer as your next message, or send `skip` to skip the question.\n\n",
+    );
+    expect(stopReason).toBe("end_turn");
+    expect(harness.fake.inputResponses()).toEqual([]);
+  });
+
+  it("carries the next message back as the answer, under the question", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askWhichOrganisms();
+
+    const second = await harness.withClient(async (context) => {
+      const session = await context.buildSession(folder).start();
+      await runTurn(session, "Align the reads");
+      return runTurn(session, "Human, Mouse");
+    });
+
+    expect(harness.fake.inputResponses()).toMatchObject([
+      { approved: true, action: "answer", answers: { "Which organisms?": "Human, Mouse" } },
+    ]);
+    expect(second.chunks.join("")).toBe("Aligning.");
   });
 });
 
@@ -649,6 +823,140 @@ describe("in a client that can put forms to its user", () => {
       async (context) => {
         const session = await context.buildSession(folder).start();
         return runTurn(session, "Analyse my genomes");
+      },
+      { forms: true },
+    );
+
+    expect(stopReason).toBe("cancelled");
+    expect(harness.fake.inputResponses()).toEqual([]);
+  });
+  /** The daemon asks for a contact email address, then says what came of it. */
+  function askForEmailInAForm() {
+    harness.fake.onNextMessage(async (turn) => {
+      const [answer] = await turn.ask([
+        {
+          kind: "contact_email",
+          notice_text: "What the address is used for.",
+          notice_version: "v1",
+        },
+      ]);
+      turn.replyText(answer?.approved === true ? `Using ${String(answer.text)}.` : "No email.");
+      turn.complete();
+    });
+  }
+
+  /** What a form with a field to type in shows: the question and that the field takes text. */
+  function textFormShown(form: CreateElicitationRequest | undefined) {
+    // The SDK types a form's schema loosely, so it is read as the JSON it is.
+    const { requestedSchema: schema = {} } = JSON.parse(JSON.stringify(form ?? {})) as {
+      requestedSchema?: {
+        properties?: Record<string, { type?: string; oneOf?: unknown; description?: string }>;
+      };
+    };
+    const field = schema.properties?.answer;
+    return {
+      message: form?.message,
+      type: field?.type,
+      choices: field?.oneOf,
+      description: field?.description,
+    };
+  }
+
+  it("a request for something to type is put as a form with a field to type in", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmailInAForm();
+    harness.answerForms(() => ({ action: "accept", content: { answer: " ada@example.org " } }));
+
+    const { chunks, stopReason } = await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        return runTurn(session, "Find the paper");
+      },
+      { forms: true },
+    );
+
+    expect(textFormShown(harness.forms()[0])).toEqual({
+      message: "Claude Science asks for a contact email address.",
+      type: "string",
+      choices: undefined,
+      description:
+        "Claude Science asks for a contact email address. Type the address, or `decline` to " +
+        "share none and not be asked again, or `skip` to decide later.",
+    });
+    expect(harness.fake.inputResponses()).toMatchObject([
+      { approved: true, action: "allow", text: "ada@example.org" },
+    ]);
+    // The daemon's notice is in the thread, and the reply goes on in the same turn.
+    expect(chunks.join("")).toBe(
+      "**Claude Science asks for a contact email address.**\n\n" +
+        "What the address is used for.\n\nUsing ada@example.org.",
+    );
+    expect(stopReason).toBe("end_turn");
+  });
+
+  it("a word typed into the field is the answer it stands for", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmailInAForm();
+    harness.answerForms(() => ({ action: "accept", content: { answer: "decline" } }));
+
+    await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        return runTurn(session, "Find the paper");
+      },
+      { forms: true },
+    );
+
+    expect(harness.fake.inputResponses()).toMatchObject([{ approved: false, action: "deny" }]);
+  });
+
+  it("the form comes again when what was typed is no answer", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmailInAForm();
+    const typed = ["ada at example", "ada@example.org"];
+    harness.answerForms(() => ({ action: "accept", content: { answer: typed.shift() } }));
+
+    await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        return runTurn(session, "Find the paper");
+      },
+      { forms: true },
+    );
+
+    expect(harness.forms()).toHaveLength(2);
+    expect(textFormShown(harness.forms()[1]).description).toMatch(
+      /^That is not what Claude Science asked for\. Claude Science asks for a contact email/,
+    );
+    expect(harness.fake.inputResponses()).toMatchObject([{ text: "ada@example.org" }]);
+  });
+
+  it("a declined form for something to type decides nothing for good", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmailInAForm();
+    harness.answerForms(() => ({ action: "decline" }));
+
+    await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        return runTurn(session, "Find the paper");
+      },
+      { forms: true },
+    );
+
+    // Not "deny", which the daemon remembers as never to ask again.
+    expect(harness.fake.inputResponses()).toMatchObject([{ approved: false, action: "cancel" }]);
+  });
+
+  it("a closed form for something to type leaves the request unanswered", async () => {
+    const { folder } = await harness.linkedFolder("Protein folding");
+    askForEmailInAForm();
+    harness.answerForms(() => ({ action: "cancel" }));
+
+    const { stopReason } = await harness.withClient(
+      async (context) => {
+        const session = await context.buildSession(folder).start();
+        return runTurn(session, "Find the paper");
       },
       { forms: true },
     );

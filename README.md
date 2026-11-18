@@ -154,9 +154,15 @@ choices Claude Science offers. Pick one and the reply carries on.
 
 If you leave a question unanswered, it comes up again with your next message.
 
-Questions that need you to type something, such as a password, an API key or an email address,
-are answered in the Claude Science app. The thread tells you when one is waiting, and the reply
-continues in your client as soon as you have answered it there.
+When Claude Science asks for something you type, such as a contact email address or an answer
+with more than one pick, T3 Code shows a field to type in. The thread says what to type and
+which words stand for the other answers, for example `decline` or `skip`. In a client that
+cannot show such a field, the question appears in the thread and your next message is the
+answer.
+
+Passwords and API keys are answered in the Claude Science app, so that they do not end up in a
+thread. The thread tells you when one is waiting, and the reply continues in your client as
+soon as you have answered it there.
 
 ### Choosing a model and effort
 

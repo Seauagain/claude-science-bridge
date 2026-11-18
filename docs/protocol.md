@@ -15,6 +15,7 @@ statement below as an observation about one version, not a contract.
 | ---------- | ---------------------------------------------------------------------------- |
 | **[live]** | Observed against the real daemon, including real turns in a scratch project. |
 | **[web]**  | Read from the daemon's bundled web client code. Not exercised by us.         |
+| **[code]** | Read from the daemon's own program code. Not exercised by us.                |
 | **[open]** | Unknown.                                                                     |
 
 ## Discovery
@@ -120,6 +121,14 @@ on the user's computer, or a question.
     <label> }`, or `approved: false, action: "cancel"` to skip it. The web client shows the
     first question only, sends several picked labels joined with ", " and sends text the user
     typed as it is. **[web]**
+  - a contact email address (`kind: "contact_email"`, with `notice_text` and `notice_version`:
+    what the address is used for, which the daemon records with the decision): `approved: true,
+    action: "allow", text: <address>` to give one, `approved: false, action: "deny"` to give
+    none and not be asked again, or `approved: false, action: "cancel"` to decide later. The
+    daemon takes an address of at most 320 characters that matches `^[^\s@]+@[^\s@]+\.[^\s@]+$`
+    and has no control characters, and refuses any other action, an `allow` without such an
+    address, and a `scope`. With which status it refuses is not known; the fake answers 400.
+    **[code]**
 - The answer to `resolve-input` is `{ root_frame_id, frame_id, status: "accepted",
   race_lost_refusals: [], remaining_tool_ids: [] }`. The turn then carries on by itself: the
   frame is `processing` again at once and ends as any turn does. Answering requests that are
@@ -133,7 +142,10 @@ on the user's computer, or a question.
   conversation), `remote_exec`, `byoc_submit` and `infer_submit` (the same four; suggests
   once), `skill_license` (project, always), and without scopes `managed_endpoint_register`,
   `set_goal` and `usage_checkpoint`. The kinds `credential_request`, `ssh_password`,
-  `provider_discovery` and `contact_email` take text the user types. **[web]**
+  `provider_discovery` and `contact_email` take text the user types. **[web]** The adapter
+  carries an answer to `contact_email` and to a question that takes more than one pick, and
+  leaves the other three to Claude Science: two are secrets, and what `provider_discovery`
+  takes besides its `text` is not known.
 - The web client sends the answers to the frame that holds the list, which for a sub-agent's
   request is the sub-agent's frame, and counts a list only on a frame whose status is
   `awaiting_user_response` or `processing`: a frame's `output_data` can hold what a turn that
