@@ -34,7 +34,8 @@ the daemon's side, tool invocation.
 
 **Input request**: something the daemon asks the user before a turn can go on: an approval, for
 example of access to a folder, or a question. It has **choices**; the user's pick is the
-**answer**. _Avoid_: permission (ACP's word for one way of asking), prompt.
+**answer**. Some take a **typed answer** as well: text in the user's own words, such as an email
+address. _Avoid_: permission (ACP's word for one way of asking), prompt.
 
 **Session**: the ACP client's handle on a conversation. One session maps to at most one
 conversation. _Avoid_: using "session" for the login.

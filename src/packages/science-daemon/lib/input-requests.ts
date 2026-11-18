@@ -14,8 +14,19 @@ export interface InputChoice {
 }
 
 /**
+ * What a request takes in the user's own words, such as an email address. A request that has
+ * this is answered with such text or with one of its choices.
+ */
+export interface TypedAnswer {
+  /** What to type, as it follows "send": `the address`, for example. */
+  readonly what: string;
+  /** Whether `text` is such an answer. An email address has to look like one. */
+  accepts(text: string): boolean;
+}
+
+/**
  * Something the daemon asks the user before a turn can go on: an approval, for example of
- * access to a folder, or a question with choices.
+ * access to a folder, a question with choices, or something to type.
  */
 export interface InputRequest {
   readonly requestId: string;
@@ -23,19 +34,31 @@ export interface InputRequest {
   readonly kind: string;
   /** What is asked, as one line for the user. */
   readonly question: string;
+  /** What the daemon wants the user to have read before answering, in its own words. */
+  readonly notice?: string;
   /**
-   * The answers the user can give. Empty for a request that takes more than a choice, such as
-   * a password: that one can only be answered in Claude Science itself.
+   * The answers the user can pick. With {@link InputRequest.typed} these are the other answers
+   * the request takes, such as declining, and each `id` is a word the user can say it with.
+   * Without it, an empty list means a request that can only be answered in Claude Science
+   * itself, such as one for a password.
    */
   readonly choices: readonly InputChoice[];
+  /** Present for a request that is answered in the user's own words. */
+  readonly typed?: TypedAnswer;
 }
 
-/** The choice the user made for one input request. */
-export interface InputAnswer {
-  readonly request: InputRequest;
-  /** The `id` of one of the request's choices. */
-  readonly choiceId: string;
-}
+/** The answer the user gave to one input request: one of its choices, or text they typed. */
+export type InputAnswer =
+  | {
+      readonly request: InputRequest;
+      /** The `id` of one of the request's choices. */
+      readonly choiceId: string;
+    }
+  | {
+      readonly request: InputRequest;
+      /** Text the request's {@link TypedAnswer} accepts. */
+      readonly text: string;
+    };
 
 /** What answering a request takes besides the user's choice. */
 interface Wire {
@@ -44,6 +67,8 @@ interface Wire {
   readonly toolId: string | undefined;
   /** What each choice is as a response, less the fields every response has. */
   readonly responses: ReadonlyMap<string, JsonRecord>;
+  /** What text the user typed is as a response, for a request that takes it. */
+  readonly typedResponse: ((text: string) => JsonRecord) | undefined;
 }
 
 /** Kept beside the requests, so that what the daemon needs back stays out of their interface. */
@@ -60,17 +85,20 @@ export function parseInputRequests(value: unknown, holder: string | undefined): 
   return value.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.requestId !== "string") return [];
     const kind = typeof entry.kind === "string" ? entry.kind : "";
-    const { question, choices } = describe(kind, entry);
+    const { question, notice, choices, typed } = describe(kind, entry);
     const request: InputRequest = {
       requestId: entry.requestId,
       kind,
       question,
+      ...(notice === undefined ? {} : { notice }),
       choices: choices.map(({ response: _response, ...choice }) => choice),
+      ...(typed === undefined ? {} : { typed: { what: typed.what, accepts: typed.accepts } }),
     };
     wires.set(request, {
       frameId: holder ?? (typeof entry.frameId === "string" ? entry.frameId : undefined),
       toolId: typeof entry.tool_id === "string" ? entry.tool_id : undefined,
       responses: new Map(choices.map(({ id, response }) => [id, response])),
+      typedResponse: typed?.response,
     });
     return [request];
   });
@@ -83,8 +111,9 @@ export function parseInputRequests(value: unknown, holder: string | undefined): 
  * Resolves to false when the daemon says the requests had their answers already, from the
  * browser for example, so that these answers changed nothing.
  *
- * @throws Error for an answer whose request did not come from {@link parseInputRequests} or
- *   whose choice the request does not have: both are mistakes of the caller.
+ * @throws Error for an answer whose request did not come from {@link parseInputRequests}, whose
+ *   choice the request does not have or whose text it does not accept: all are mistakes of the
+ *   caller.
  */
 export async function answerInputRequests(
   http: DaemonHttp,
@@ -92,11 +121,16 @@ export async function answerInputRequests(
   answers: readonly InputAnswer[],
 ): Promise<boolean> {
   const byFrame = new Map<string, JsonRecord[]>();
-  for (const { request, choiceId } of answers) {
+  for (const answer of answers) {
+    const { request } = answer;
     const wire = wires.get(request);
-    const response = wire?.responses.get(choiceId);
+    const response = wire === undefined ? undefined : responseOf(answer, wire);
     if (wire === undefined || response === undefined) {
-      throw new Error(`Input request ${request.requestId} has no choice "${choiceId}".`);
+      throw new Error(
+        `Input request ${request.requestId} does not take ${
+          "text" in answer ? "this text" : `the choice "${answer.choiceId}"`
+        }.`,
+      );
     }
     const frameId = wire.frameId ?? conversationId;
     byFrame.set(frameId, [
@@ -118,7 +152,21 @@ export async function answerInputRequests(
   return applied;
 }
 
+function responseOf(answer: InputAnswer, wire: Wire): JsonRecord | undefined {
+  if (!("text" in answer)) return wire.responses.get(answer.choiceId);
+  const text = answer.text.trim();
+  return answer.request.typed?.accepts(text) === true ? wire.typedResponse?.(text) : undefined;
+}
+
 type Choice = InputChoice & { readonly response: JsonRecord };
+
+/** A request as csbridge puts it to the user, with what each answer is on the wire. */
+interface Described {
+  readonly question: string;
+  readonly notice?: string;
+  readonly choices: readonly Choice[];
+  readonly typed?: TypedAnswer & { readonly response: (text: string) => JsonRecord };
+}
 
 const DENY: Choice = {
   id: "deny",
@@ -240,27 +288,23 @@ const APPROVALS: Readonly<
   },
 };
 
-/** What the daemon waits for with the kinds that take more than a choice. */
-const TYPED_ANSWERS: Readonly<Record<string, string>> = {
-  ask: "an answer to its questions",
+/**
+ * What the daemon waits for with the kinds csbridge carries no answer to. The first two are
+ * secrets, which do not belong in the text of a thread.
+ */
+const LEFT_TO_CLAUDE_SCIENCE: Readonly<Record<string, string>> = {
   credential_request: "a credential",
   ssh_password: "an SSH password",
   provider_discovery: "an answer about your compute",
-  contact_email: "a contact email address",
 };
 
-function describe(
-  kind: string,
-  request: JsonRecord,
-): { question: string; choices: readonly Choice[] } {
+function describe(kind: string, request: JsonRecord): Described {
   if (kind === "host") return folderAccess(request);
-  if (kind === "ask") {
-    const asked = questionWithChoices(request);
-    if (asked !== undefined) return asked;
-  }
+  if (kind === "ask") return questionWithChoices(request) ?? questionInWords(request);
+  if (kind === "contact_email") return contactEmail(request);
   const approval = APPROVALS[kind];
   if (approval === undefined) {
-    const awaited = TYPED_ANSWERS[kind] ?? `an answer ("${kind}")`;
+    const awaited = LEFT_TO_CLAUDE_SCIENCE[kind] ?? `an answer ("${kind}")`;
     return { question: `Claude Science is waiting for ${awaited}`, choices: [] };
   }
   const reason = text(request.reason);
@@ -271,7 +315,7 @@ function describe(
 }
 
 /** Access to a folder on the user's computer, which the daemon remembers once it is given. */
-function folderAccess(request: JsonRecord): { question: string; choices: readonly Choice[] } {
+function folderAccess(request: JsonRecord): Described {
   const writes = request.requested_mode === "rw";
   const allow = (mode: "ro" | "rw", label: string): Choice => ({
     id: `allow:${mode}`,
@@ -303,20 +347,35 @@ function folderAccess(request: JsonRecord): { question: string; choices: readonl
   };
 }
 
+const SKIP_QUESTION: Choice = {
+  id: "skip",
+  label: "Skip",
+  grants: false,
+  lasting: false,
+  response: { approved: false, action: "cancel" },
+};
+
+/** The first question of an `ask` request and the labels of its options. */
+function firstQuestion(request: JsonRecord): { question: string | undefined; labels: string[] } {
+  const [asked] = Array.isArray(request.questions) ? request.questions : [];
+  if (!isRecord(asked)) return { question: undefined, labels: [] };
+  return {
+    question: text(asked.question),
+    labels: (Array.isArray(asked.options) ? asked.options : []).flatMap((option) =>
+      isRecord(option) && typeof option.label === "string" ? [option.label] : [],
+    ),
+  };
+}
+
 /**
  * A single question with choices to pick one from. The daemon can also ask several questions
- * at once, let several choices be picked and take free text: those have no choices here.
+ * at once and let several choices be picked: those are {@link questionInWords}.
  */
-function questionWithChoices(
-  request: JsonRecord,
-): { question: string; choices: readonly Choice[] } | undefined {
+function questionWithChoices(request: JsonRecord): Described | undefined {
   const questions = Array.isArray(request.questions) ? request.questions : [];
   const [asked] = questions;
   if (questions.length !== 1 || !isRecord(asked) || asked.multi_select === true) return undefined;
-  const question = text(asked.question);
-  const labels = (Array.isArray(asked.options) ? asked.options : []).flatMap((option) =>
-    isRecord(option) && typeof option.label === "string" ? [option.label] : [],
-  );
+  const { question, labels } = firstQuestion(request);
   if (question === undefined || labels.length === 0) return undefined;
   return {
     question,
@@ -330,15 +389,79 @@ function questionWithChoices(
           response: { approved: true, action: "answer", answers: { [question]: label } },
         }),
       ),
+      SKIP_QUESTION,
+    ],
+  };
+}
+
+/**
+ * A question that takes more than one pick: it is answered in the user's own words, which the
+ * daemon takes as it takes text typed into its own client. Of several questions the first is
+ * put, as that client does.
+ */
+function questionInWords(request: JsonRecord): Described {
+  const { question, labels } = firstQuestion(request);
+  if (question === undefined) {
+    return { question: "Claude Science is waiting for an answer to its questions", choices: [] };
+  }
+  return {
+    question,
+    ...(labels.length === 0
+      ? {}
+      : {
+          notice: [
+            "Name one or more of these, separated by commas, or answer in your own words:",
+            ...labels.map((label) => `- ${label}`),
+          ].join("\n"),
+        }),
+    choices: [{ ...SKIP_QUESTION, label: "skip the question" }],
+    typed: {
+      what: "your answer",
+      accepts: (answer) => answer !== "",
+      response: (answer) => ({ approved: true, action: "answer", answers: { [question]: answer } }),
+    },
+  };
+}
+
+/**
+ * A contact email address for the research services that ask for one. The daemon's notice says
+ * what the address is used for, and the daemon records the notice with the user's decision.
+ */
+function contactEmail(request: JsonRecord): Described {
+  const notice = typeof request.notice_text === "string" ? request.notice_text.trim() : "";
+  return {
+    question: "Claude Science asks for a contact email address.",
+    ...(notice === "" ? {} : { notice }),
+    choices: [
+      {
+        id: "decline",
+        label: "share none and not be asked again",
+        grants: false,
+        lasting: true,
+        response: { approved: false, action: "deny" },
+      },
       {
         id: "skip",
-        label: "Skip",
+        label: "decide later",
         grants: false,
         lasting: false,
         response: { approved: false, action: "cancel" },
       },
     ],
+    typed: {
+      what: "the address",
+      accepts: isEmailAddress,
+      response: (address) => ({ approved: true, action: "allow", text: address }),
+    },
   };
+}
+
+/** What the daemon takes for an email address. */
+function isEmailAddress(value: string): boolean {
+  if (value.length > 320) return false;
+  // No control characters, which `\s` covers only in part.
+  if ([...value].some((character) => character < " " || character === "\u007f")) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 /**

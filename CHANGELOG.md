@@ -35,6 +35,10 @@ All notable changes to this project are recorded here. The format follows
   a form in a client that offers forms, as a permission request in any other. A conversation
   that is still waiting for an answer no longer fails the next message with "Please answer the
   pending question(s)": the question comes up first.
+- What Claude Science asks the user to type (a contact email address, or an answer to a
+  question with more than one pick) can be answered in the client: in a field of a form where
+  the client shows forms, as T3 Code does, and with the next message anywhere else. Before,
+  the thread only said to answer it in Claude Science. Passwords and API keys still are.
 - The tools Claude Science uses during a turn show in the client as tool calls: pending under
   the tool's name while the call is written, in progress with Claude Science's description and
   the tool's input once it runs, and completed or failed with what the tool gave back. Reasoning

@@ -19,8 +19,8 @@ import { INVALID_REQUEST, rethrowAsRequestError } from "./errors.ts";
 import type { FileReferences } from "./file-references.ts";
 import type { FolderProjects } from "./folder-project.ts";
 import { HISTORY_COMMAND, historyText, locatedTranscript, OPEN_COMMAND } from "./history.ts";
-import type { AskingWay } from "./input-requests.ts";
-import { type PromptContent, promptContent, promptWords } from "./prompt-content.ts";
+import { type AskingWay, WaitingMessage } from "./input-requests.ts";
+import { type PromptContent, promptContent, promptWords, typedWords } from "./prompt-content.ts";
 import { relayTurn, type ShownToolCalls } from "./relay-turn.ts";
 import type { SessionRecord } from "./session-record.ts";
 import { settingsInForce } from "./settings.ts";
@@ -117,8 +117,11 @@ export async function answerPrompt(
         ? undefined
         : await (await surroundings.daemon()).waitingTurn(session.conversationId, cancel.signal);
     if (waiting !== undefined) {
-      const stopped = await relayTurn(waiting, target, cancel.signal, surroundings);
-      if (stopped.stopReason !== "end_turn") return stopped;
+      // What the turn asked may be answered in the user's own words: then this prompt is the
+      // answer and not a message of its own.
+      const message = new WaitingMessage(typedWords(request.prompt));
+      const stopped = await relayTurn(waiting, { ...target, message }, cancel.signal, surroundings);
+      if (stopped.stopReason !== "end_turn" || message.taken) return stopped;
       // What follows is the reply to this prompt, not more of the turn that had asked.
       await surroundings.client.notify(methods.client.session.update, {
         sessionId: request.sessionId,

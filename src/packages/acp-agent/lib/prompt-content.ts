@@ -25,6 +25,14 @@ export function promptWords(blocks: readonly ContentBlock[]): string {
 }
 
 /**
+ * What the user typed in a prompt: its first text. A client may add text of its own after it,
+ * as T3 Code ends every prompt with a note about itself.
+ */
+export function typedWords(blocks: readonly ContentBlock[]): string {
+  return blocks.flatMap((block) => (block.type === "text" ? [block.text] : []))[0] ?? "";
+}
+
+/**
  * Renders an ACP prompt as the message Claude Science receives. Text is passed through and
  * links to resources are sent as their URI, each on its own line. Images and embedded resources
  * become attachments, and so does a file that a client saved in one of `attachmentFolders` and

@@ -141,6 +141,8 @@ export class FakeConversations {
           },
         };
       }
+      const refusal = contactEmailRefusal(conversation.pendingRequests[index], response);
+      if (refusal !== undefined) return { status: 400, body: { detail: refusal } };
       conversation.pendingRequests.splice(index, 1);
       conversation.answered.push(response);
       this.#inputResponses.push(response);
@@ -429,4 +431,24 @@ function notFound(frameId: string): Answer {
 function namedIn(body: unknown, field: string): string | null {
   const value = isRecord(body) ? body[field] : undefined;
   return typeof value === "string" ? value : null;
+}
+
+/**
+ * Why the daemon takes no such response to a request for a contact email address, in its own
+ * words, or nothing for a response it takes. See "Input requests" in docs/protocol.md.
+ */
+function contactEmailRefusal(
+  request: JsonRecord | undefined,
+  response: JsonRecord,
+): string | undefined {
+  if (request?.kind !== "contact_email") return undefined;
+  const { action, text, scope } = response;
+  if (action !== "allow" && action !== "deny" && action !== "cancel") {
+    return `contact_email accepts only allow/deny/cancel, got '${String(action ?? "<none>")}'.`;
+  }
+  const address = typeof text === "string" ? text.trim() : "";
+  if (action === "allow" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    return "contact_email allow requires a valid email in `text`.";
+  }
+  return scope === undefined ? undefined : "contact_email responses do not take `scope`.";
 }

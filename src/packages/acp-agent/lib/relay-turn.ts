@@ -8,7 +8,7 @@ import {
 import type { ScienceDaemon, ToolEvent, Turn } from "../../science-daemon/index.ts";
 import { INTERNAL_ERROR } from "./errors.ts";
 import { type FileReferences, PassingText } from "./file-references.ts";
-import { type AskingWay, askUser } from "./input-requests.ts";
+import { type AskingWay, askUser, type WaitingMessage } from "./input-requests.ts";
 
 /**
  * The tool calls a session has shown its client, by identifier, and whether each has ended. A
@@ -34,6 +34,11 @@ export interface RelayTarget {
   readonly toolCalls: ShownToolCalls;
   /** Where the conversation's files are. {@link relayTurn} adds what the turn's tools name. */
   readonly files: FileReferences;
+  /**
+   * The message the user sent while the turn was stopped to ask, for a turn that is taken up
+   * again. It answers a request that is answered in the user's own words.
+   */
+  readonly message?: WaitingMessage;
 }
 
 /**
@@ -41,10 +46,13 @@ export interface RelayTarget {
  * thoughts, the tool uses as tool calls, and what the daemon asks the user as questions, whose
  * answers go back to the daemon. A file the reply names relative to a folder a tool worked in
  * is named by its full path: see {@link FileReferences}.
+ *
+ * A turn that asks for something the user answers in their own words ends the prompt, as
+ * `end_turn`, while the turn itself stays stopped: the user's next message is the answer.
  */
 export async function relayTurn(
   turn: Turn,
-  { sessionId, toolCalls, files }: RelayTarget,
+  { sessionId, toolCalls, files, message }: RelayTarget,
   cancel: AbortSignal,
   { client, daemon, askingWay }: RelaySurroundings,
 ): Promise<PromptResponse> {
@@ -70,20 +78,26 @@ export async function relayTurn(
         content: { type: "text", text: event.text },
       });
     } else if (event.type === "input-requested") {
-      const answers = await askUser(event.requests, sessionId, client, askingWay);
+      const asked = await askUser(event.requests, sessionId, client, askingWay, message);
       // The user stopped the turn while being asked: its end, as cancelled, is still to come.
       if (cancel.aborted) continue;
       // Left unanswered, the requests stay pending: the next prompt brings them up again.
-      if (answers === undefined) return { stopReason: "cancelled" };
-      if (answers.length > 0) {
-        const applied = await (await daemon()).answerInputRequests(turn.conversationId, answers);
+      if (asked.outcome === "unanswered") return { stopReason: "cancelled" };
+      if (asked.answers.length > 0) {
+        const applied = await (await daemon()).answerInputRequests(
+          turn.conversationId,
+          asked.answers,
+        );
         if (!applied) {
           await say(
-            "This was already answered in Claude Science, so the choice made here " +
+            "This was already answered in Claude Science, so the answer given here " +
               "was not applied.\n\n",
           );
         }
       }
+      // The turn stays stopped at the daemon. The prompt ends here so that the user can send
+      // the message that answers, and the next prompt takes the turn up again.
+      if (asked.outcome === "awaits-message") return { stopReason: "end_turn" };
     } else if (event.type !== "ended") {
       files.learn(event.toolUse.input);
       if (event.type === "tool-ended") files.learn(event.output);
