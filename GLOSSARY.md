@@ -17,6 +17,10 @@ On the wire it is a root frame. _Avoid_: chat, thread (a thread is the ACP clien
 conversation's project, and the message names it by a **reference**. _Avoid_: upload (the act,
 not the file).
 
+**Artifact**: a file Claude Science made and kept with a project, such as a figure. Each state of
+it is a **version**. A reply shows one by a **marker** that holds the version's identifier.
+_Avoid_: output, result (a tool has those).
+
 **Frame**: the daemon's unit of agent execution. A conversation is a root frame; work delegated to
 a sub-agent runs in a child frame.
 
@@ -48,7 +52,8 @@ conversation. _Avoid_: using "session" for the login.
 project. A folder is **linked** when it or one of its ancestors holds one.
 
 **State folder**: where csbridge keeps its own record of which session belongs to which
-conversation (`sessions.jsonl`, identifiers only). Never inside the Claude Science data folder.
+conversation (`sessions.jsonl`, identifiers only) and its copies of the artifacts that replies
+show (`artifacts/`). Never inside the Claude Science data folder.
 
 **Adapter**: this program in its role as an ACP agent, `csbridge acp`.
 

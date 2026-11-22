@@ -11,6 +11,21 @@ export interface DaemonHttp {
   post(path: string, body?: unknown): Promise<unknown>;
   /** Sends one file as a `multipart/form-data` body, in its field `file`. */
   upload(path: string, file: UploadedFile): Promise<unknown>;
+  /**
+   * Fetches a file. A file the daemon says is longer than `mostBytes` is not read.
+   *
+   * @throws ScienceDaemonError with kind `rejected` for a file that is longer than that.
+   */
+  download(path: string, mostBytes: number): Promise<DownloadedFile>;
+}
+
+/** A file the daemon sent: what {@link DaemonHttp.download} resolves to. */
+export interface DownloadedFile {
+  /** The media type the daemon named, or an empty string when it named none. */
+  readonly contentType: string;
+  /** The file's name as the daemon gave it, when it gave one. */
+  readonly filename: string | undefined;
+  readonly data: Uint8Array;
 }
 
 /** A file for {@link DaemonHttp.upload}. */
@@ -27,6 +42,10 @@ type Payload = { readonly json: unknown } | { readonly file: UploadedFile } | un
 interface HttpAnswer {
   readonly status: number;
   readonly ok: boolean;
+  readonly headers: Headers;
+  /** The body, or nothing for one that was left unread because it is longer than was asked for. */
+  readonly body: Uint8Array | undefined;
+  /** The body as text. */
   readonly text: string;
 }
 
@@ -41,6 +60,7 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
     method: "GET" | "POST",
     path: string,
     payload: Payload,
+    mostBytes = Number.POSITIVE_INFINITY,
   ): Promise<HttpAnswer> => {
     const { endpoint } = access;
     const headers: Record<string, string> = { cookie: login.cookieHeader };
@@ -58,29 +78,48 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
         signal,
         ...bodyOf(payload),
       });
-      return { status: response.status, ok: response.ok, text: await response.text() };
+      const answer = { status: response.status, ok: response.ok, headers: response.headers };
+      // Only a file is ever too long: an error is read whatever its length, to be reported.
+      if (response.ok && Number(response.headers.get("content-length")) > mostBytes) {
+        await response.body?.cancel();
+        return { ...answer, body: undefined, text: "" };
+      }
+      const body = new Uint8Array(await response.arrayBuffer());
+      return { ...answer, body, text: new TextDecoder().decode(body) };
     });
   };
 
-  const send = async (method: "GET" | "POST", path: string, body?: Payload): Promise<unknown> => {
-    const call = `${method} ${path}`;
+  /** The daemon's answer to a request, once it is not an error. */
+  const answerTo = async (
+    method: "GET" | "POST",
+    path: string,
+    body?: Payload,
+    mostBytes?: number,
+  ): Promise<HttpAnswer> => {
     const login = access.login;
-    let answer = await exchange(login, method, path, body);
+    let answer = await exchange(login, method, path, body, mostBytes);
     // A 401 means the login is gone. The daemon did not act on the request, so it is safe to
     // send it again.
     if (answer.status === 401) {
-      answer = await exchange(await access.renewLogin(login), method, path, body);
+      answer = await exchange(await access.renewLogin(login), method, path, body, mostBytes);
       if (answer.status === 401) throw newLoginRejected();
     } else if (hasStaleCsrfToken(answer)) {
-      answer = await exchange(await access.refreshCsrfToken(login), method, path, body);
+      answer = await exchange(await access.refreshCsrfToken(login), method, path, body, mostBytes);
     }
 
     if (!answer.ok) {
       throw new ScienceDaemonError(
         answer.status === 404 ? "not-found" : "rejected",
-        `Claude Science refused "${call}" (HTTP ${answer.status}): ${errorDetail(answer.text)}`,
+        `Claude Science refused "${method} ${path}" (HTTP ${answer.status}): ` +
+          errorDetail(answer.text),
       );
     }
+    return answer;
+  };
+
+  const send = async (method: "GET" | "POST", path: string, body?: Payload): Promise<unknown> => {
+    const call = `${method} ${path}`;
+    const answer = await answerTo(method, path, body);
     if (answer.text === "") return undefined;
     try {
       return JSON.parse(answer.text);
@@ -95,7 +134,37 @@ export function createDaemonHttp(access: DaemonAccess): DaemonHttp {
     get: (path) => send("GET", path),
     post: (path, body) => send("POST", path, body === undefined ? undefined : { json: body }),
     upload: (path, file) => send("POST", path, { file }),
+    async download(path, mostBytes) {
+      const { headers, body } = await answerTo("GET", path, undefined, mostBytes);
+      if (body === undefined) {
+        throw new ScienceDaemonError(
+          "rejected",
+          `"GET ${path}" answers with a file of more than ${mostBytes} bytes, which is not read.`,
+        );
+      }
+      return {
+        contentType: headers.get("content-type") ?? "",
+        filename: filenameIn(headers.get("content-disposition") ?? ""),
+        data: body,
+      };
+    },
   };
+}
+
+/**
+ * The file name a `Content-Disposition` header gives: the one in `filename*`, which holds a name
+ * that is not ASCII, before the one in `filename`. See "Artifacts" in docs/protocol.md.
+ */
+function filenameIn(disposition: string): string | undefined {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (encoded !== undefined) {
+    try {
+      return decodeURIComponent(encoded.trim());
+    } catch {
+      // Not percent-encoded after all: the plain name is next.
+    }
+  }
+  return /filename="([^"]*)"/i.exec(disposition)?.[1];
 }
 
 /** The `fetch` body of a payload. A form is built anew for each attempt. */

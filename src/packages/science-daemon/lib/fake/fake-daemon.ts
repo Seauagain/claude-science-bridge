@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 import type { ScienceCli } from "../science-cli.ts";
 import type { JsonRecord } from "../validate.ts";
+import { type FakeArtifact, FakeArtifacts } from "./fake-artifacts.ts";
 import { type FakeAttachment, FakeAttachments } from "./fake-attachments.ts";
 import type { ExistingConversation, FakeConversation, ReplyScript } from "./fake-conversation.ts";
 import { FakeConversations } from "./fake-conversations.ts";
@@ -35,6 +36,7 @@ class FakeDaemon implements FakeScienceDaemon {
   readonly #conversations = new FakeConversations((event) => this.#sockets.broadcast(event));
   readonly #projects = new FakeProjects();
   readonly #attachments = new FakeAttachments();
+  readonly #artifacts = new FakeArtifacts();
   readonly #responseOverrides = new Map<string, unknown>();
   /** Sockets whose handshake was left unanswered, kept so that stopping the daemon cuts them. */
   readonly #unansweredHandshakes = new Set<Duplex>();
@@ -120,6 +122,14 @@ class FakeDaemon implements FakeScienceDaemon {
 
   attachments(): FakeAttachment[] {
     return this.#attachments.all();
+  }
+
+  addArtifact(artifact: FakeArtifact): string {
+    return this.#artifacts.add(artifact);
+  }
+
+  artifactReads(): string[] {
+    return this.#artifacts.reads();
   }
 
   onNextMessage(script: ReplyScript): void {
@@ -211,6 +221,10 @@ class FakeDaemon implements FakeScienceDaemon {
     const refusal = this.#logins.refusal(request, this.#origin);
     if (refusal === undefined && route === "GET /api/csrf") {
       return this.#logins.refreshCsrfToken(response);
+    }
+    const version = /^GET \/api\/artifacts\/versions\/([^/]+)$/.exec(route)?.[1];
+    if (refusal === undefined && version !== undefined) {
+      return this.#artifacts.serve(decodeURIComponent(version), response);
     }
     const answer = refusal ?? this.#override(route) ?? (await this.#answer(route, url, request));
     sendJson(response, answer.status, answer.body);

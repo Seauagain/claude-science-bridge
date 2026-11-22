@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { type ArtifactLocator, PassingLinks } from "./artifact-links.ts";
 
 /** A full path as it stands in what a tool was given or gave back, alone or inside code. */
 const FULL_PATH = /(?<![\w.~@+-])\/(?:[\w.@+~-]+\/)*[\w.@+~-]+/g;
@@ -19,15 +20,22 @@ const LONGEST_SPAN = 400;
  * tools are given full paths, though. So the folders the tools worked in are remembered, and a
  * relative path that is exactly one file below one of them is known by its full path.
  *
+ * A file Claude Science made and kept, an artifact, is named by a marker instead of a path. It
+ * is known by the path `artifacts` finds for it: see {@link ArtifactLocator}.
+ *
  * Paths are those of a POSIX file system, which is where the daemon runs.
  */
 export class FileReferences {
   readonly #sessionFolder: string;
   readonly #folders = new Set<string>();
   readonly #located = new Map<string, string | undefined>();
+  /** Finds the file of an artifact a reply names. */
+  readonly artifacts: ArtifactLocator;
 
-  constructor(sessionFolder: string) {
+  /** Without `artifacts`, no artifact has a file. */
+  constructor(sessionFolder: string, artifacts: ArtifactLocator = async () => undefined) {
     this.#sessionFolder = sessionFolder;
+    this.artifacts = artifacts;
   }
 
   /** Remembers the folders named in what a tool was given or gave back, and those above them. */
@@ -74,7 +82,10 @@ export class FileReferences {
     return found;
   }
 
-  /** `text` with the files its code spans name given by their full paths. */
+  /**
+   * `text` with the files its code spans name given by their full paths, and its links to
+   * artifacts pointing at the artifacts' files.
+   */
   async located(text: string): Promise<string> {
     const passing = new PassingText(this);
     return (await passing.add(text)) + (await passing.end());
@@ -92,23 +103,26 @@ async function isFile(path: string): Promise<boolean> {
 
 /**
  * Reply text on its way to a client, piece by piece. A code span that names a file comes out
- * naming it by its full path. Text is held back only from the start of a code span to its end,
- * so a reply still arrives as it is written. Code blocks pass as they are.
+ * naming it by its full path, and a link to an artifact pointing at the artifact's file: see
+ * {@link PassingLinks}. Text is held back only from the start of a code span or of such a link
+ * to its end, so a reply still arrives as it is written. Code blocks keep their code spans.
  */
 export class PassingText {
   readonly #files: FileReferences;
+  readonly #links: PassingLinks;
   #held = "";
   /** The length of the run of backticks that opened the code block the text is in, if any. */
   #blockFence: number | undefined;
 
   constructor(files: FileReferences) {
     this.#files = files;
+    this.#links = new PassingLinks(files.artifacts);
   }
 
   /** Takes the next piece and returns what can go to the client now, which may be nothing. */
-  add(piece: string): Promise<string> {
+  async add(piece: string): Promise<string> {
     this.#held += piece;
-    return this.#pass(false);
+    return this.#links.add(await this.#pass(false));
   }
 
   /**
@@ -118,7 +132,7 @@ export class PassingText {
   async end(): Promise<string> {
     const rest = await this.#pass(true);
     this.#blockFence = undefined;
-    return rest;
+    return (await this.#links.add(rest)) + (await this.#links.end());
   }
 
   /** Passes what is held as far as it can be told what it is. `complete`: no more text follows. */

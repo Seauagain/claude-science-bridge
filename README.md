@@ -141,7 +141,8 @@ While Claude Science works, each tool it uses shows up in the thread as a tool c
 
 A file Claude Science names in a reply opens from the thread, also when it lies outside the
 thread's folder: `csbridge` finds it in the folders the tools worked in and links it by its full
-path.
+path. A figure Claude Science made shows in the reply: `csbridge` fetches it and points the image
+at a copy on your computer.
 
 In T3 Code, tool calls are shown live while the reply is being written. Afterwards they fold into
 a single "Worked for ..." row above the answer. Click the row to see them again, and click a call
@@ -216,12 +217,12 @@ and `--provider` names your T3 Code provider if you did not call it `claudeScien
 
 ### Settings
 
-| Setting                       | What it is for                                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--claude-science-bin <path>` | Where the `claude-science` program is, if `csbridge` does not find it by itself.                                   |
-| `CLAUDE_SCIENCE_BIN`          | The same, as an environment variable.                                                                              |
-| `CSBRIDGE_START_COMMAND`      | The command that starts Claude Science on your machine, shown in the hint when Claude Science is not running.      |
-| `CSBRIDGE_STATE_DIR`          | Where `csbridge` remembers which thread belongs to which conversation. By default `.csbridge` in your home folder. |
+| Setting                       | What it is for                                                                                                 |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--claude-science-bin <path>` | Where the `claude-science` program is, if `csbridge` does not find it by itself.                               |
+| `CLAUDE_SCIENCE_BIN`          | The same, as an environment variable.                                                                          |
+| `CSBRIDGE_START_COMMAND`      | The command that starts Claude Science on your machine, shown in the hint when Claude Science is not running.  |
+| `CSBRIDGE_STATE_DIR`          | Where `csbridge` keeps what it remembers and the figures it shows. By default `.csbridge` in your home folder. |
 
 ## Good to know
 
@@ -231,6 +232,9 @@ and `--provider` names your T3 Code provider if you did not call it `claudeScien
   supported, and neither is a file too large for Claude Science to take in one upload. If your
   T3 Code keeps its data somewhere other than `~/.t3`, add `T3CODE_HOME` with that folder to the
   provider's `environment`, or attached files other than images are not found.
+- **Figures are copied to your computer.** A figure a reply shows is saved once in
+  `~/.csbridge/artifacts`, because your client can only show a file it can read. The copies stay
+  until you delete them; deleting the folder is safe, and a figure shown again is fetched again.
 - **Sub-agents work behind one tool call.** When Claude Science hands work to sub-agents, the
   thread shows the tool call that starts them. Open the conversation in the Claude Science app
   to follow what each sub-agent does.
