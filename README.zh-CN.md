@@ -116,7 +116,7 @@ Claude Science 工作时，它用到的每个工具都会作为一次工具调�
 - 工具开始运行后，标题换成 Claude Science 自己对这一步的描述，比如“Fitting the dose-response curve”。点开可以看到它处理的代码、查询或文件。
 - 工具结束后，调用标记为完成或失败，并附上返回的内容。对于代码，就是代码打印的输出。
 
-Claude Science 在回复里提到的文件可以直接从线程里打开，即使它不在线程所在的文件夹里：`csbridge` 会在工具用过的文件夹里找到它，并用完整路径链接。
+Claude Science 在回复里提到的文件可以直接从线程里打开，即使它不在线程所在的文件夹里：`csbridge` 会在工具用过的文件夹里找到它，并用完整路径链接。Claude Science 生成的图片会直接显示在回复里：`csbridge` 把它取回来，并让图片指向你电脑上的一份副本。
 
 在 T3 Code 里，回复生成期间工具调用实时显示；回复结束后，它们折叠成答案上方的一行“Worked for ...”。点击这一行可以重新展开，点击某次调用可以查看它的输入和输出。
 
@@ -179,11 +179,12 @@ $ csbridge link --all ~/science-projects
 | `--claude-science-bin <path>` | `claude-science` 程序的位置，在 `csbridge` 自己找不到它时使用。               |
 | `CLAUDE_SCIENCE_BIN`          | 同上，以环境变量的形式设置。                                                  |
 | `CSBRIDGE_START_COMMAND`      | 在你的机器上启动 Claude Science 的命令，Claude Science 未运行时显示在提示里。 |
-| `CSBRIDGE_STATE_DIR`          | `csbridge` 记录“哪条线程对应哪个对话”的位置，默认是主目录下的 `.csbridge`。   |
+| `CSBRIDGE_STATE_DIR`          | `csbridge` 保存自身记录和所显示图片的位置，默认是主目录下的 `.csbridge`。     |
 
 ## 使用须知
 
 - **附件会复制到项目里。** 消息中附带的图片或文件会交给 Claude Science，并保存在对话所属的项目中，与在 Claude Science 应用里添加附件相同。仅在消息里链接的文件仍以路径的形式发送。暂不支持音频，也不支持超过 Claude Science 单次上传上限的文件。如果你的 T3 Code 把数据放在 `~/.t3` 以外的位置，请在 provider 的 `environment` 里加上 `T3CODE_HOME` 并填入那个文件夹，否则图片以外的附件会找不到。
+- **图片会复制到你的电脑上。** 回复里显示的图片会在 `~/.csbridge/artifacts` 里保存一份，因为客户端只能显示它读得到的文件。这些副本会一直保留到你删除为止；删掉这个文件夹没有影响，再次显示的图片会重新取回。
 - **子 agent 在一次工具调用背后工作。** Claude Science 把工作交给子 agent 时，线程里显示启动它们的那次工具调用。想看每个子 agent 的具体过程，在 Claude Science 应用里打开这个对话。
 - **工具结束后才显示输出。** 运行时间长的工具在结束前一直显示为进行中。
 - **在 T3 Code 里给已完成的线程换模型。** T3 Code 可能提示“This model pick was not saved”。照常发送下一条消息即可：你选的模型会随消息一起生效，之后选择器恢复正常。

@@ -5,7 +5,7 @@ in `src/packages/science-daemon`. The interface is internal and undocumented: tr
 statement below as an observation about one version, not a contract.
 
 - Observed version: **0.1.53** (macOS arm64), 2026-11-15. "Attachments" was observed on
-  **0.1.72** (Linux x64), 2026-11-16.
+  **0.1.72** (Linux x64), 2026-11-16, and "Artifacts" on **0.1.53** (macOS arm64), 2026-11-22.
 - The in-repo fake daemon (`science-daemon/testing.ts`) implements exactly what this file says.
   When real behaviour differs, fix this file and the fake first, then the code.
 
@@ -66,6 +66,7 @@ All paths are under `/api`.
 | `POST /frames/<root_id>/cancel`                        | no body → `{ root_frame_id, cancelled_frames: [ids] }`                                                                                                                                                                    | **[live]** |
 | `POST /frames/<id>/resolve-input`                      | `{ responses: [...] }` → `{ root_frame_id, frame_id, status, race_lost_refusals, remaining_tool_ids }`. Answers input requests. See "Input requests".                                                                     | **[live]** |
 | `POST /projects/<project_id>/attachments`              | `multipart/form-data` with the file in the field `file` → `{ id, version_id, filename, content_type, size_bytes, root_frame_id, created_at, file_path }`. See "Attachments".                                              | **[live]** |
+| `GET /artifacts/versions/<version_id>`                 | → the bytes of that version of an artifact, not JSON. See "Artifacts".                                                                                                                                                    | **[live]** |
 
 Notes on `POST /request`, all **[live]**:
 
@@ -186,6 +187,29 @@ A file the user sends along with a message. The daemon keeps it with the project
 - `POST /request` takes references the same way: a further message with a new attachment was
   read by the model. **[live]**
 - Not observed: an upload for a project that does not exist. **[open]**
+
+## Artifacts
+
+A file Claude Science made and kept with a project, such as a figure. Each state of the file is
+a version with an identifier of its own.
+
+- **In a reply.** The model is told to show a figure it saved as a Markdown image whose
+  destination is a marker: `![caption]({{artifact:<version_id>}})`, with the note that "the
+  frontend resolves these to correct URLs". **[code]** A reply held exactly that, with a UUID as
+  the version's identifier, in the transcript and in the `text_chunk` events alike. **[live]**
+  The same marker stands in code the model writes (`pd.read_csv("{{artifact:<version_id>}}")`),
+  where the daemon replaces it by a path before the code runs. **[code]**
+- **Fetching.** `GET /artifacts/versions/<version_id>` answers 200 with the file's bytes, its
+  media type in `Content-Type`, `Content-Length`, `Cache-Control: public, max-age=31536000,
+  immutable` and `Content-Disposition: inline; filename="<filename>"`. **[live]** (a PNG) A name
+  that is not ASCII is given twice: with every such character replaced by `_` in `filename`, and
+  percent-encoded in `filename*=UTF-8''<name>` after it. **[code]**
+- A version the daemon does not have: 404, `detail: "Version <version_id> not found"`.
+  **[live]**
+- `?thumbnail=<pixels>` answers with a small WebP rendering instead, named `<filename>.webp`.
+  **[live]** Not used.
+- The adapter fetches a version once and saves it below its own state folder, never in the
+  daemon's: see ADR 0010. It fetches no file of more than 64 MiB.
 
 ## Conversations and their messages
 

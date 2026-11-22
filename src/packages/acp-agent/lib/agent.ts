@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   type AgentApp,
   type AgentContext,
@@ -13,6 +14,7 @@ import {
   type ScienceDaemon,
   ScienceDaemonError,
 } from "../../science-daemon/index.ts";
+import { savedArtifacts } from "./artifact-links.ts";
 import { INVALID_PARAMS, rethrowAsRequestError } from "./errors.ts";
 import { FileReferences } from "./file-references.ts";
 import { createFolderProjects } from "./folder-project.ts";
@@ -33,9 +35,10 @@ export interface ScienceAgentOptions {
   readonly connectDaemon: () => Promise<ScienceDaemon>;
   /**
    * The folder csbridge keeps its own state in: the record of which session belongs to which
-   * conversation, which holds identifiers only. The folder is created when the first session
-   * is recorded, and is shared by every adapter process of the user. It must not be the Claude
-   * Science data folder.
+   * conversation, which holds identifiers only, and in `artifacts` the files Claude Science
+   * made that a reply shows. The folder is created when the first session is recorded or the
+   * first such file is saved, and is shared by every adapter process of the user. It must not
+   * be the Claude Science data folder.
    */
   readonly stateFolder: string;
   /**
@@ -69,6 +72,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
     return connection;
   };
   const projectOf = createFolderProjects(daemon);
+  const artifacts = savedArtifacts(join(options.stateFolder, "artifacts"), daemon);
   // Known once the client has initialized, which it does before anything else.
   let askingWay = askingWayOf(undefined);
   // The models are asked for anew for each session: the daemon's list can change while this
@@ -122,7 +126,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         cwd: params.cwd,
         clientServers: params.mcpServers,
         toolCalls: new Map(),
-        files: new FileReferences(params.cwd),
+        files: new FileReferences(params.cwd, artifacts),
       };
       sessions.set(sessionId, session);
       await offerCommands(client, sessionId);
@@ -161,7 +165,7 @@ export function createScienceAgent(options: ScienceAgentOptions): AgentApp {
         // record. Any other identifier is that of a conversation the client found in the list.
         const conversationId = (await record.conversationOf(sessionId)) ?? sessionId;
         const science = await daemon();
-        const files = sessions.get(sessionId)?.files ?? new FileReferences(params.cwd);
+        const files = sessions.get(sessionId)?.files ?? new FileReferences(params.cwd, artifacts);
         const transcript = await locatedTranscript(
           await science.readTranscript(conversationId),
           files,

@@ -6,6 +6,14 @@ All notable changes to this project are recorded here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A figure Claude Science shows in a reply now appears in the thread. A reply names it by a
+  marker only Claude Science's own page can follow, which a client showed as an image without
+  an address (`![caption]()`). The adapter fetches the file once, keeps a copy in
+  `artifacts` in its state folder (`~/.csbridge` by default) and points the image at the copy.
+  The history of a conversation is shown the same way.
+
 ### Added
 
 - Attachments: an image or file in a prompt is handed to Claude Science and named in the message

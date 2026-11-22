@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DaemonAccess } from "./access.ts";
+import { type ArtifactFile, readArtifact } from "./artifacts.ts";
 import { type AttachmentFile, messageWithAttachments } from "./attachments.ts";
 import { unlessCancelled } from "./cancellation.ts";
 import { readConversationState, readInputRequests } from "./conversation-state.ts";
@@ -64,6 +65,15 @@ export interface ScienceDaemon {
    *   and otherwise when it cannot be reached or answers unexpectedly.
    */
   readTranscript(conversationId: string): Promise<TranscriptEntry[]>;
+  /**
+   * Fetches a file Claude Science made, in the version `versionId` names. A reply shows such a
+   * file by a marker that holds this identifier: `{{artifact:<versionId>}}`.
+   *
+   * @throws ScienceDaemonError with kind `not-found` when the daemon has no such version, with
+   *   kind `rejected` for a file too long to fetch, and otherwise when the daemon cannot be
+   *   reached.
+   */
+  readArtifact(versionId: string): Promise<ArtifactFile>;
   /**
    * Lists the models the daemon offers, with the effort levels each takes and the defaults.
    *
@@ -196,6 +206,10 @@ export async function connectScienceDaemon(options: ConnectOptions): Promise<Sci
     async readTranscript(conversationId) {
       await socket.ready();
       return readTranscript(http, conversationId);
+    },
+    async readArtifact(versionId) {
+      await socket.ready();
+      return readArtifact(http, versionId);
     },
     async listModels() {
       await socket.ready();
